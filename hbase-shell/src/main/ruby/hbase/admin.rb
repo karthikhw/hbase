@@ -390,15 +390,15 @@ module Hbase
     def drop_all(regex)
       pattern = Pattern.compile(regex.to_s)
       failed = java.util.ArrayList.new
-      admin.listTableNames(pattern).each do |table_name|
+      @admin.listTableNames(pattern).each do |table_name|
         begin
-          admin.deleteTable(table_name)
+          @admin.deleteTable(table_name)
         rescue java.io.IOException => e
           puts puts "table:#{table_name}, error:#{e.toString}"
           failed.add(table_name)
         end
       end
-      @failed
+      failed
     end
 
     #----------------------------------------------------------------------------------------------
@@ -533,9 +533,12 @@ module Hbase
     #----------------------------------------------------------------------------------------------
     # Merge two regions
     def merge_region(region_a_name, region_b_name, force)
-      @admin.mergeRegions(region_a_name.to_java_bytes,
-                          region_b_name.to_java_bytes,
-                          java.lang.Boolean.valueOf(force))
+      @admin.mergeRegionsAsync(
+        region_a_name.to_java_bytes,
+        region_b_name.to_java_bytes,
+        java.lang.Boolean.valueOf(force)
+      )
+      return nil
     end
 
     #----------------------------------------------------------------------------------------------

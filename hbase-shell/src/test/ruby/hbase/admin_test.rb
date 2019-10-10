@@ -367,6 +367,17 @@ module Hbase
       assert(output.include?('0 row(s)'))
     end
 
+    define_test 'describe_namespace should return quota disabled' do
+      ns = 'ns'
+      quota_table = ::HBaseQuotasConstants::QUOTA_TABLE_NAME.to_s
+      drop_test_table(quota_table)
+      command(:create_namespace, ns)
+      output = capture_stdout { command(:describe_namespace, ns) }
+      # re-creating quota table otherwise other test case may fail
+      command(:create, quota_table, 'q', 'u')
+      assert(output.include?('Quota is disabled'))
+    end
+
     #-------------------------------------------------------------------------------
 
     define_test 'truncate should empty a table' do
@@ -430,6 +441,10 @@ module Hbase
       admin.enable_all(@regex)
       assert(command(:is_enabled, @t1))
       assert(command(:is_enabled, @t2))
+      admin.disable_all(@regex)
+      admin.drop_all(@regex)
+      assert(!command(:exists, @t1))
+      assert(!command(:exists, @t2))
     end
 
     #-------------------------------------------------------------------------------
@@ -558,6 +573,17 @@ module Hbase
 
     define_test "list regions should allow table name" do
       command(:list_regions, @test_name)
+    end
+
+    define_test 'merge two regions' do
+      @t_name = 'hbase_shell_merge'
+      drop_test_table(@t_name)
+      admin.create(@t_name, 'a', NUMREGIONS => 10, SPLITALGO => 'HexStringSplit')
+      r1 = command(:locate_region, @t_name, '')
+      r2 = command(:locate_region, @t_name, '1')
+      region1 = r1.getRegion.getRegionNameAsString
+      region2 = r2.getRegion.getRegionNameAsString
+      command(:merge_region, region1, region2, true)
     end
   end
 
