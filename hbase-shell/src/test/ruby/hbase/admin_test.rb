@@ -98,6 +98,11 @@ module Hbase
       assert(list.count > 0)
     end
 
+    define_test 'list_deadservers should return exact count of dead servers' do
+      output = capture_stdout { command(:list_deadservers) }
+      assert(output.include?('0 row(s)'))
+    end
+
     #-------------------------------------------------------------------------------
 
     define_test "flush should work" do
@@ -105,6 +110,16 @@ module Hbase
       servers = admin.list_liveservers
       servers.each do |s|
         command(:flush, s.toString)
+      end
+    end
+    #-------------------------------------------------------------------------------
+    define_test 'compact all regions by server name' do
+      servers = admin.list_liveservers
+      servers.each do |s|
+        command(:compact_rs, s.to_s)
+        # major compact
+        command(:compact_rs, s.to_s, true)
+        break
       end
     end
 
