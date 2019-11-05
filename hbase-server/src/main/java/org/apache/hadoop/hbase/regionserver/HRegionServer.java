@@ -65,6 +65,7 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Abortable;
 import org.apache.hadoop.hbase.CacheEvictionStats;
+import org.apache.hadoop.hbase.CallQueueTooBigException;
 import org.apache.hadoop.hbase.ChoreService;
 import org.apache.hadoop.hbase.ClockOutOfSyncException;
 import org.apache.hadoop.hbase.CoordinatedStateManager;
@@ -1655,6 +1656,8 @@ public class HRegionServer extends HasThread implements
     byte[] name = r.getRegionInfo().getRegionName();
     int stores = 0;
     int storefiles = 0;
+    int storeRefCount = 0;
+    int maxStoreFileRefCount = 0;
     int storeUncompressedSizeMB = 0;
     int storefileSizeMB = 0;
     int memstoreSizeMB = (int) (r.getMemStoreDataSize() / 1024 / 1024);
@@ -1668,6 +1671,10 @@ public class HRegionServer extends HasThread implements
     stores += storeList.size();
     for (HStore store : storeList) {
       storefiles += store.getStorefilesCount();
+      int currentStoreRefCount = store.getStoreRefCount();
+      storeRefCount += currentStoreRefCount;
+      int currentMaxStoreFileRefCount = store.getMaxStoreFileRefCount();
+      maxStoreFileRefCount = Math.max(maxStoreFileRefCount, currentMaxStoreFileRefCount);
       storeUncompressedSizeMB += (int) (store.getStoreSizeUncompressed() / 1024 / 1024);
       storefileSizeMB += (int) (store.getStorefilesSize() / 1024 / 1024);
       //TODO: storefileIndexSizeKB is same with rootLevelIndexSizeKB?
@@ -1695,6 +1702,8 @@ public class HRegionServer extends HasThread implements
     regionLoadBldr.setRegionSpecifier(regionSpecifier.build())
       .setStores(stores)
       .setStorefiles(storefiles)
+      .setStoreRefCount(storeRefCount)
+      .setMaxStoreFileRefCount(maxStoreFileRefCount)
       .setStoreUncompressedSizeMB(storeUncompressedSizeMB)
       .setStorefileSizeMB(storefileSizeMB)
       .setMemStoreSizeMB(memstoreSizeMB)
@@ -1935,7 +1944,7 @@ public class HRegionServer extends HasThread implements
           this.getRegionServerMetrics().getMetricsSource());
     }
 
-    this.walRoller = new LogRoller(this, this);
+    this.walRoller = new LogRoller(this);
     this.flushThroughputController = FlushThroughputControllerFactory.create(this, conf);
     this.procedureResultReporter = new RemoteProcedureResultReporter(this);
 
@@ -2353,8 +2362,9 @@ public class HRegionServer extends HasThread implements
         return true;
       } catch (ServiceException se) {
         IOException ioe = ProtobufUtil.getRemoteException(se);
-        boolean pause = ioe instanceof ServerNotRunningYetException ||
-            ioe instanceof PleaseHoldException;
+        boolean pause =
+            ioe instanceof ServerNotRunningYetException || ioe instanceof PleaseHoldException
+                || ioe instanceof CallQueueTooBigException;
         if (pause) {
           // Do backoff else we flood the Master with requests.
           pauseTime = ConnectionUtils.getPauseTime(INIT_PAUSE_TIME_MS, tries);
