@@ -1274,13 +1274,8 @@ public class HMaster extends HRegionServer implements MasterServices {
 
     int mobCompactionPeriod = conf.getInt(MobConstants.MOB_COMPACTION_CHORE_PERIOD,
         MobConstants.DEFAULT_MOB_COMPACTION_CHORE_PERIOD);
-    if (mobCompactionPeriod > 0) {
-      this.mobCompactChore = new MobCompactionChore(this, mobCompactionPeriod);
-      getChoreService().scheduleChore(mobCompactChore);
-    } else {
-      LOG
-        .info("The period is " + mobCompactionPeriod + " seconds, MobCompactionChore is disabled");
-    }
+    this.mobCompactChore = new MobCompactionChore(this, mobCompactionPeriod);
+    getChoreService().scheduleChore(mobCompactChore);
     this.mobCompactThread = new MasterMobCompactionThread(this);
   }
 
@@ -3485,7 +3480,7 @@ public class HMaster extends HRegionServer implements MasterServices {
     if (cpHost != null) {
       cpHost.preListReplicationPeers(regex);
     }
-    LOG.info(getClientIdAuditPrefix() + " list replication peers, regex=" + regex);
+    LOG.debug("{} list replication peers, regex={}", getClientIdAuditPrefix(), regex);
     Pattern pattern = regex == null ? null : Pattern.compile(regex);
     List<ReplicationPeerDescription> peers =
       this.replicationPeerManager.listPeers(pattern);
@@ -3685,5 +3680,9 @@ public class HMaster extends HRegionServer implements MasterServices {
 
   public HbckChore getHbckChore() {
     return this.hbckChore;
+  }
+
+  public SnapshotQuotaObserverChore getSnapshotQuotaObserverChore() {
+    return this.snapshotQuotaChore;
   }
 }

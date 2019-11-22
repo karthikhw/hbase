@@ -20,6 +20,7 @@ package org.apache.hadoop.hbase.master;
 
 import static org.apache.hadoop.hbase.master.MasterWalManager.META_FILTER;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.BindException;
 import java.net.InetAddress;
@@ -294,6 +295,8 @@ import org.apache.hadoop.hbase.shaded.protobuf.generated.QuotaProtos.GetQuotaSta
 import org.apache.hadoop.hbase.shaded.protobuf.generated.QuotaProtos.GetSpaceQuotaRegionSizesRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.QuotaProtos.GetSpaceQuotaRegionSizesResponse;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.QuotaProtos.GetSpaceQuotaRegionSizesResponse.RegionSizes;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RegionServerStatusProtos.FileArchiveNotificationRequest;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RegionServerStatusProtos.FileArchiveNotificationResponse;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.RegionServerStatusProtos.GetLastFlushedSequenceIdRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.RegionServerStatusProtos.GetLastFlushedSequenceIdResponse;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.RegionServerStatusProtos.RegionServerReportRequest;
@@ -2474,26 +2477,18 @@ public class MasterRpcServices extends RSRpcServices
   public MasterProtos.ScheduleServerCrashProcedureResponse scheduleServerCrashProcedure(
       RpcController controller, MasterProtos.ScheduleServerCrashProcedureRequest request)
       throws ServiceException {
-    List<HBaseProtos.ServerName> serverNames = request.getServerNameList();
     List<Long> pids = new ArrayList<>();
-    try {
-      for (HBaseProtos.ServerName serverName : serverNames) {
-        ServerName server = ProtobufUtil.toServerName(serverName);
-        LOG.info("{} schedule ServerCrashProcedure for {}",
-            master.getClientIdAuditPrefix(), server);
-        if (shouldSubmitSCP(server)) {
-          master.getServerManager().moveFromOnlineToDeadServers(server);
-          ProcedureExecutor<MasterProcedureEnv> procExec = this.master.getMasterProcedureExecutor();
-          pids.add(procExec.submitProcedure(new ServerCrashProcedure(procExec.getEnvironment(),
-            server, true, containMetaWals(server))));
-        } else {
-          pids.add(-1L);
-        }
+    for (HBaseProtos.ServerName sn: request.getServerNameList()) {
+      ServerName serverName = ProtobufUtil.toServerName(sn);
+      LOG.info("{} schedule ServerCrashProcedure for {}",
+          this.master.getClientIdAuditPrefix(), serverName);
+      if (shouldSubmitSCP(serverName)) {
+        pids.add(this.master.getServerManager().expireServer(serverName, true));
+      } else {
+        pids.add(Procedure.NO_PROC_ID);
       }
-      return MasterProtos.ScheduleServerCrashProcedureResponse.newBuilder().addAllPid(pids).build();
-    } catch (IOException e) {
-      throw new ServiceException(e);
     }
+    return MasterProtos.ScheduleServerCrashProcedureResponse.newBuilder().addAllPid(pids).build();
   }
 
   @Override
@@ -2536,6 +2531,22 @@ public class MasterRpcServices extends RSRpcServices
     try {
       master.checkInitialized();
       return master.getMasterQuotaManager().switchExceedThrottleQuota(request);
+    } catch (Exception e) {
+      throw new ServiceException(e);
+    }
+  }
+
+  @Override
+  public FileArchiveNotificationResponse reportFileArchival(RpcController controller,
+      FileArchiveNotificationRequest request) throws ServiceException {
+    try {
+      master.checkInitialized();
+      if (!QuotaUtil.isQuotaEnabled(master.getConfiguration())) {
+        return FileArchiveNotificationResponse.newBuilder().build();
+      }
+      master.getMasterQuotaManager().processFileArchivals(request, master.getConnection(),
+          master.getConfiguration(), master.getFileSystem());
+      return FileArchiveNotificationResponse.newBuilder().build();
     } catch (Exception e) {
       throw new ServiceException(e);
     }
@@ -2706,7 +2717,14 @@ public class MasterRpcServices extends RSRpcServices
         AbstractFSWALProvider.getWALDirectoryName(serverName.toString()));
     Path splitDir = logDir.suffix(AbstractFSWALProvider.SPLITTING_EXT);
     Path checkDir = master.getFileSystem().exists(splitDir) ? splitDir : logDir;
-    return master.getFileSystem().listStatus(checkDir, META_FILTER).length > 0;
+    try {
+      return master.getFileSystem().listStatus(checkDir, META_FILTER).length > 0;
+    } catch (FileNotFoundException fnfe) {
+      // If no files, then we don't contain metas; was failing schedule of
+      // SCP because this was FNFE'ing when no server dirs ('Unknown Server').
+      LOG.warn("No dir for WALs for {}; continuing", serverName.toString());
+      return false;
+    }
   }
 
   private boolean shouldSubmitSCP(ServerName serverName) {

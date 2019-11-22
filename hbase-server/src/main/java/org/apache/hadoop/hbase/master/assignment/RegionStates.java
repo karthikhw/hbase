@@ -350,9 +350,13 @@ public class RegionStates {
     if (LOG.isTraceEnabled()) {
       LOG.trace("WORKING ON " + node + " " + node.getRegionInfo());
     }
-    if (node.isInState(State.SPLIT)) return false;
-    if (node.isInState(State.OFFLINE) && !offline) return false;
     final RegionInfo hri = node.getRegionInfo();
+    if (node.isInState(State.SPLIT) || hri.isSplit()) {
+      return false;
+    }
+    if ((node.isInState(State.OFFLINE) || hri.isOffline()) && !offline) {
+      return false;
+    }
     return (!hri.isOffline() && !hri.isSplit()) ||
         ((hri.isOffline() || hri.isSplit()) && offline);
   }
@@ -723,6 +727,9 @@ public class RegionStates {
     serverMap.remove(serverName);
   }
 
+  /**
+   * @return Pertinent ServerStateNode or NULL if none found.
+   */
   @VisibleForTesting
   public ServerStateNode getServerNode(final ServerName serverName) {
     return serverMap.get(serverName);
