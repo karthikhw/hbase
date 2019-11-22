@@ -1,4 +1,5 @@
 /*
+ *
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -15,32 +16,34 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.hadoop.hbase.util;
 
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+
 import org.apache.yetus.audience.InterfaceAudience;
+import org.apache.hbase.thirdparty.com.google.common.annotations.VisibleForTesting;
 
-/**
- * SMA measure the overall average execution time of a specific method.
- */
 @InterfaceAudience.Private
-public class SimpleMovingAverage extends MovingAverage {
-  private double averageTime = 0.0;
-  protected long count = 0;
+public class IdReadWriteLockStrongRef<T> extends IdReadWriteLock<T> {
 
-  public SimpleMovingAverage(String label) {
-    super(label);
-    this.averageTime = 0.0;
-    this.count = 0;
-  }
+  final ConcurrentHashMap<T, ReentrantReadWriteLock> map = new ConcurrentHashMap<>();
 
+  @VisibleForTesting
   @Override
-  public void updateMostRecentTime(long elapsed) {
-    averageTime += (elapsed - averageTime) / (++count);
+  public ReentrantReadWriteLock getLock(T id) {
+    ReentrantReadWriteLock existing = map.get(id);
+    if (existing != null) {
+      return existing;
+    }
+
+    ReentrantReadWriteLock newLock = new ReentrantReadWriteLock();
+    existing = map.putIfAbsent(id, newLock);
+    if (existing == null) {
+      return newLock;
+    } else {
+      return existing;
+    }
   }
 
-  @Override
-  public double getAverageTime() {
-    return averageTime;
-  }
 }

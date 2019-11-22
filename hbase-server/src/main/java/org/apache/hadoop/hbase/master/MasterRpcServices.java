@@ -2585,26 +2585,18 @@ public class MasterRpcServices extends RSRpcServices
   public MasterProtos.ScheduleServerCrashProcedureResponse scheduleServerCrashProcedure(
       RpcController controller, MasterProtos.ScheduleServerCrashProcedureRequest request)
       throws ServiceException {
-    List<HBaseProtos.ServerName> serverNames = request.getServerNameList();
     List<Long> pids = new ArrayList<>();
-    try {
-      for (HBaseProtos.ServerName serverName : serverNames) {
-        ServerName server = ProtobufUtil.toServerName(serverName);
-        LOG.info("{} schedule ServerCrashProcedure for {}",
-            master.getClientIdAuditPrefix(), server);
-        if (shouldSubmitSCP(server)) {
-          master.getServerManager().moveFromOnlineToDeadServers(server);
-          ProcedureExecutor<MasterProcedureEnv> procExec = this.master.getMasterProcedureExecutor();
-          pids.add(procExec.submitProcedure(new ServerCrashProcedure(procExec.getEnvironment(),
-            server, true, containMetaWals(server))));
-        } else {
-          pids.add(-1L);
-        }
+    for (HBaseProtos.ServerName sn: request.getServerNameList()) {
+      ServerName serverName = ProtobufUtil.toServerName(sn);
+      LOG.info("{} schedule ServerCrashProcedure for {}",
+          this.master.getClientIdAuditPrefix(), serverName);
+      if (shouldSubmitSCP(serverName)) {
+        pids.add(this.master.getServerManager().expireServer(serverName, true));
+      } else {
+        pids.add(Procedure.NO_PROC_ID);
       }
-      return MasterProtos.ScheduleServerCrashProcedureResponse.newBuilder().addAllPid(pids).build();
-    } catch (IOException e) {
-      throw new ServiceException(e);
     }
+    return MasterProtos.ScheduleServerCrashProcedureResponse.newBuilder().addAllPid(pids).build();
   }
 
   @Override
