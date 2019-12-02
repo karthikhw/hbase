@@ -1,29 +1,28 @@
 /*
- * Copyright The Apache Software Foundation
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements. See the NOTICE file distributed with this
- * work for additional information regarding copyright ownership. The ASF
- * licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 package org.apache.hadoop.hbase.thrift;
 
 import static org.apache.hadoop.hbase.thrift.Constants.THRIFT_SUPPORT_PROXYUSER_KEY;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
 
 import java.io.File;
+import java.nio.file.Paths;
 import java.security.Principal;
 import java.security.PrivilegedExceptionAction;
 import java.util.Set;
@@ -31,7 +30,6 @@ import java.util.Set;
 import javax.security.auth.Subject;
 import javax.security.auth.kerberos.KerberosTicket;
 
-import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HBaseClassTestRule;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
@@ -53,7 +51,6 @@ import org.apache.http.impl.auth.SPNegoSchemeFactory;
 import org.apache.http.impl.client.BasicCredentialsProvider;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
-import org.apache.kerby.kerberos.kerb.KrbException;
 import org.apache.kerby.kerberos.kerb.client.JaasKrbUtil;
 import org.apache.kerby.kerberos.kerb.server.SimpleKdcServer;
 import org.apache.thrift.protocol.TBinaryProtocol;
@@ -92,20 +89,10 @@ public class TestThriftSpnegoHttpServer extends TestThriftHttpServer {
   private static String serverPrincipal;
   private static String spnegoServerPrincipal;
 
-  private static void setupUser(SimpleKdcServer kdc, File keytab, String principal)
-      throws KrbException {
-    kdc.createPrincipal(principal);
-    kdc.exportPrincipal(principal, keytab);
-  }
-
   private static SimpleKdcServer buildMiniKdc() throws Exception {
     SimpleKdcServer kdc = new SimpleKdcServer();
 
-    final File target = new File(System.getProperty("user.dir"), "target");
-    File kdcDir = new File(target, TestThriftSpnegoHttpServer.class.getSimpleName());
-    if (kdcDir.exists()) {
-      FileUtils.deleteDirectory(kdcDir);
-    }
+    File kdcDir = Paths.get(TEST_UTIL.getRandomDir().toString()).toAbsolutePath().toFile();
     kdcDir.mkdirs();
     kdc.setWorkDir(kdcDir);
 
@@ -126,48 +113,42 @@ public class TestThriftSpnegoHttpServer extends TestThriftHttpServer {
     KerberosName.setRules("DEFAULT");
 
     HBaseKerberosUtils.setKeytabFileForTesting(serverKeytab.getAbsolutePath());
-    HBaseKerberosUtils.setSecuredConfiguration(conf, serverPrincipal, spnegoServerPrincipal);
 
     conf.setBoolean(THRIFT_SUPPORT_PROXYUSER_KEY, true);
     conf.setBoolean(Constants.USE_HTTP_CONF_KEY, true);
-    conf.set("hadoop.proxyuser.hbase.hosts", "*");
-    conf.set("hadoop.proxyuser.hbase.groups", "*");
 
     conf.set(Constants.THRIFT_KERBEROS_PRINCIPAL_KEY, serverPrincipal);
     conf.set(Constants.THRIFT_KEYTAB_FILE_KEY, serverKeytab.getAbsolutePath());
+
+    HBaseKerberosUtils.setSecuredConfiguration(conf, serverPrincipal, spnegoServerPrincipal);
+    conf.set("hadoop.proxyuser.hbase.hosts", "*");
+    conf.set("hadoop.proxyuser.hbase.groups", "*");
     conf.set(Constants.THRIFT_SPNEGO_PRINCIPAL_KEY, spnegoServerPrincipal);
     conf.set(Constants.THRIFT_SPNEGO_KEYTAB_FILE_KEY, spnegoServerKeytab.getAbsolutePath());
   }
 
   @BeforeClass
   public static void setUpBeforeClass() throws Exception {
-    final File target = new File(System.getProperty("user.dir"), "target");
-    assertTrue(target.exists());
-
-    File keytabDir = new File(target, TestThriftSpnegoHttpServer.class.getSimpleName() +
-      "_keytabs");
-    if (keytabDir.exists()) {
-      FileUtils.deleteDirectory(keytabDir);
-    }
-    keytabDir.mkdirs();
-
     kdc = buildMiniKdc();
     kdc.start();
 
+    File keytabDir = Paths.get(TEST_UTIL.getRandomDir().toString()).toAbsolutePath().toFile();
+    keytabDir.mkdirs();
+
     clientPrincipal = "client@" + kdc.getKdcConfig().getKdcRealm();
     clientKeytab = new File(keytabDir, clientPrincipal + ".keytab");
-    setupUser(kdc, clientKeytab, clientPrincipal);
+    kdc.createAndExportPrincipals(clientKeytab, clientPrincipal);
 
     serverPrincipal = "hbase/" + HConstants.LOCALHOST + "@" + kdc.getKdcConfig().getKdcRealm();
     serverKeytab = new File(keytabDir, serverPrincipal.replace('/', '_') + ".keytab");
-    setupUser(kdc, serverKeytab, serverPrincipal);
 
+    // Setup separate SPNEGO keytab
     spnegoServerPrincipal = "HTTP/" + HConstants.LOCALHOST + "@" + kdc.getKdcConfig().getKdcRealm();
     spnegoServerKeytab = new File(keytabDir, spnegoServerPrincipal.replace('/', '_') + ".keytab");
-    setupUser(kdc, spnegoServerKeytab, spnegoServerPrincipal);
+    kdc.createAndExportPrincipals(spnegoServerKeytab, spnegoServerPrincipal);
+    kdc.createAndExportPrincipals(serverKeytab, serverPrincipal);
 
     TEST_UTIL.getConfiguration().setBoolean(Constants.USE_HTTP_CONF_KEY, true);
-    TEST_UTIL.getConfiguration().setBoolean(TableDescriptorChecker.TABLE_SANITY_CHECKS, false);
     addSecurityConfigurations(TEST_UTIL.getConfiguration());
 
     TestThriftHttpServer.setUpBeforeClass();
@@ -180,6 +161,7 @@ public class TestThriftSpnegoHttpServer extends TestThriftHttpServer {
     try {
       if (null != kdc) {
         kdc.stop();
+        kdc = null;
       }
     } catch (Exception e) {
       LOG.info("Failed to stop mini KDC", e);
@@ -204,11 +186,9 @@ public class TestThriftSpnegoHttpServer extends TestThriftHttpServer {
 
       TProtocol prot = new TBinaryProtocol(tHttpClient);
       Hbase.Client client = new Hbase.Client(prot);
-      if (!tableCreated) {
-        TestThriftServer.createTestTables(client);
-        tableCreated = true;
-      }
+      TestThriftServer.createTestTables(client);
       TestThriftServer.checkTableList(client);
+      TestThriftServer.dropTestTables(client);
     }
   }
 
@@ -216,15 +196,17 @@ public class TestThriftSpnegoHttpServer extends TestThriftHttpServer {
     final Subject clientSubject = JaasKrbUtil.loginUsingKeytab(clientPrincipal, clientKeytab);
     final Set<Principal> clientPrincipals = clientSubject.getPrincipals();
     // Make sure the subject has a principal
-    assertFalse(clientPrincipals.isEmpty());
+    assertFalse("Found no client principals in the clientSubject.",
+      clientPrincipals.isEmpty());
 
     // Get a TGT for the subject (might have many, different encryption types). The first should
     // be the default encryption type.
     Set<KerberosTicket> privateCredentials =
         clientSubject.getPrivateCredentials(KerberosTicket.class);
-    assertFalse(privateCredentials.isEmpty());
+    assertFalse("Found no private credentials in the clientSubject.",
+      privateCredentials.isEmpty());
     KerberosTicket tgt = privateCredentials.iterator().next();
-    assertNotNull(tgt);
+    assertNotNull("No kerberos ticket found.", tgt);
 
     // The name of the principal
     final String clientPrincipalName = clientPrincipals.iterator().next().getName();
