@@ -486,8 +486,8 @@ public class HMaster extends HRegionServer implements MasterServices {
    * </ol>
    * <p>
    * Remaining steps of initialization occur in
-   * #finishActiveMasterInitialization(MonitoredTask) after
-   * the master becomes the active one.
+   * {@link #finishActiveMasterInitialization(MonitoredTask)} after the master becomes the
+   * active one.
    */
   public HMaster(final Configuration conf)
       throws IOException, KeeperException {
@@ -722,7 +722,7 @@ public class HMaster extends HRegionServer implements MasterServices {
 
   @Override
   protected void configureInfoServer() {
-    infoServer.addServlet("master-status", "/master-status", MasterStatusServlet.class);
+    infoServer.addUnprivilegedServlet("master-status", "/master-status", MasterStatusServlet.class);
     infoServer.setAttribute(MASTER, this);
     if (LoadBalancer.isTablesOnMaster(conf)) {
       super.configureInfoServer();
@@ -1585,12 +1585,10 @@ public class HMaster extends HRegionServer implements MasterServices {
    * @return Maximum time we should run balancer for
    */
   private int getMaxBalancingTime() {
-    int maxBalancingTime = getConfiguration().getInt(HConstants.HBASE_BALANCER_MAX_BALANCING, -1);
-    if (maxBalancingTime == -1) {
-      // if max balancing time isn't set, defaulting it to period time
-      maxBalancingTime = getConfiguration().getInt(HConstants.HBASE_BALANCER_PERIOD,
-        HConstants.DEFAULT_HBASE_BALANCER_PERIOD);
-    }
+    // if max balancing time isn't set, defaulting it to period time
+    int maxBalancingTime = getConfiguration().getInt(HConstants.HBASE_BALANCER_MAX_BALANCING,
+      getConfiguration()
+        .getInt(HConstants.HBASE_BALANCER_PERIOD, HConstants.DEFAULT_HBASE_BALANCER_PERIOD));
     return maxBalancingTime;
   }
 
@@ -1697,7 +1695,9 @@ public class HMaster extends HRegionServer implements MasterServices {
 
       boolean isByTable = getConfiguration().getBoolean("hbase.master.loadbalance.bytable", false);
       Map<TableName, Map<ServerName, List<RegionInfo>>> assignments =
-          this.assignmentManager.getRegionStates().getAssignmentsForBalancer(isByTable);
+        this.assignmentManager.getRegionStates()
+          .getAssignmentsForBalancer(tableStateManager, this.serverManager.getOnlineServersList(),
+            isByTable);
       for (Map<ServerName, List<RegionInfo>> serverMap : assignments.values()) {
         serverMap.keySet().removeAll(this.serverManager.getDrainingServersList());
       }
@@ -1755,11 +1755,14 @@ public class HMaster extends HRegionServer implements MasterServices {
         //rpCount records balance plans processed, does not care if a plan succeeds
         rpCount++;
 
-        balanceThrottling(balanceStartTime + rpCount * balanceInterval, maxRegionsInTransition,
+        if (this.maxBlancingTime > 0) {
+          balanceThrottling(balanceStartTime + rpCount * balanceInterval, maxRegionsInTransition,
             cutoffTime);
+        }
 
         // if performing next balance exceeds cutoff time, exit the loop
-        if (rpCount < plans.size() && System.currentTimeMillis() > cutoffTime) {
+        if (this.maxBlancingTime > 0 && rpCount < plans.size()
+          && System.currentTimeMillis() > cutoffTime) {
           // TODO: After balance, there should not be a cutoff time (keeping it as
           // a security net for now)
           LOG.debug("No more balancing till next balance run; maxBalanceTime="
@@ -1867,6 +1870,13 @@ public class HMaster extends HRegionServer implements MasterServices {
       final long nonce) throws IOException {
     checkInitialized();
 
+    if (!isSplitOrMergeEnabled(MasterSwitchType.MERGE)) {
+      String regionsStr = Arrays.deepToString(regionsToMerge);
+      LOG.warn("Merge switch is off! skip merge of " + regionsStr);
+      throw new DoNotRetryIOException("Merge of " + regionsStr +
+          " failed because merge switch is off");
+    }
+
     final String mergeRegionsStr = Arrays.stream(regionsToMerge).
       map(r -> RegionInfo.getShortNameToLog(r)).collect(Collectors.joining(", "));
     return MasterProcedureUtil.submitProcedure(new NonceProcedureRunnable(this, ng, nonce) {
@@ -1892,6 +1902,13 @@ public class HMaster extends HRegionServer implements MasterServices {
       final long nonceGroup, final long nonce)
   throws IOException {
     checkInitialized();
+
+    if (!isSplitOrMergeEnabled(MasterSwitchType.SPLIT)) {
+      LOG.warn("Split switch is off! skip split of " + regionInfo);
+      throw new DoNotRetryIOException("Split region " + regionInfo.getRegionNameAsString() +
+          " failed due to split switch off");
+    }
+
     return MasterProcedureUtil.submitProcedure(
         new MasterProcedureUtil.NonceProcedureRunnable(this, nonceGroup, nonce) {
       @Override
@@ -2738,6 +2755,7 @@ public class HMaster extends HRegionServer implements MasterServices {
     if (cpHost != null) {
       cpHost.preShutdown();
     }
+
     // Tell the servermanager cluster shutdown has been called. This makes it so when Master is
     // last running server, it'll stop itself. Next, we broadcast the cluster shutdown by setting
     // the cluster status as down. RegionServers will notice this change in state and will start
@@ -3680,6 +3698,14 @@ public class HMaster extends HRegionServer implements MasterServices {
 
   public HbckChore getHbckChore() {
     return this.hbckChore;
+  }
+
+  @Override
+  public void runReplicationBarrierCleaner() {
+    ReplicationBarrierCleaner rbc = this.replicationBarrierCleaner;
+    if (rbc != null) {
+      rbc.chore();
+    }
   }
 
   public SnapshotQuotaObserverChore getSnapshotQuotaObserverChore() {
