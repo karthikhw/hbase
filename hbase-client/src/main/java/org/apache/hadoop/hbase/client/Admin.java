@@ -906,7 +906,10 @@ public interface Admin extends Abortable, Closeable {
    * @param forcible <code>true</code> if do a compulsory merge, otherwise we will only merge two
    *          adjacent regions
    * @throws IOException if a remote or network exception occurs
+   * @deprecated since 2.3.0 and will be removed in 4.0.0. Multi-region merge feature is now
+   *             supported. Use {@link #mergeRegionsAsync(byte[][], boolean)} instead.
    */
+  @Deprecated
   default Future<Void> mergeRegionsAsync(byte[] nameOfRegionA, byte[] nameOfRegionB,
       boolean forcible) throws IOException {
     byte[][] nameofRegionsToMerge = new byte[2][];
@@ -916,11 +919,7 @@ public interface Admin extends Abortable, Closeable {
   }
 
   /**
-   * Merge regions. Asynchronous operation.
-   * <p/>
-   * You may get a {@code DoNotRetryIOException} if you pass more than two regions in but the master
-   * does not support merging more than two regions. At least till 2.2.0, we still only support
-   * merging two regions.
+   * Merge multiple regions (>=2). Asynchronous operation.
    * @param nameofRegionsToMerge encoded or full name of daughter regions
    * @param forcible <code>true</code> if do a compulsory merge, otherwise we will only merge
    *          adjacent regions
@@ -2261,5 +2260,30 @@ public interface Admin extends Abortable, Closeable {
    * @throws IOException if a remote or network exception occurs
    */
   boolean isSnapshotCleanupEnabled() throws IOException;
+
+
+  /**
+   * Retrieves online slow RPC logs from the provided list of
+   * RegionServers
+   *
+   * @param serverNames Server names to get slowlog responses from
+   * @param slowLogQueryFilter filter to be used if provided
+   * @return online slowlog response list
+   * @throws IOException if a remote or network exception occurs
+   */
+  List<SlowLogRecord> getSlowLogResponses(final Set<ServerName> serverNames,
+      final SlowLogQueryFilter slowLogQueryFilter) throws IOException;
+
+  /**
+   * Clears online slow RPC logs from the provided list of
+   * RegionServers
+   *
+   * @param serverNames Set of Server names to clean slowlog responses from
+   * @return List of booleans representing if online slowlog response buffer is cleaned
+   *   from each RegionServer
+   * @throws IOException if a remote or network exception occurs
+   */
+  List<Boolean> clearSlowLogResponses(final Set<ServerName> serverNames)
+      throws IOException;
 
 }

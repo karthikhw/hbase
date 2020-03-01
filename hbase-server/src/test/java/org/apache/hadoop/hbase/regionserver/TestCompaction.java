@@ -51,6 +51,7 @@ import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HTableDescriptor;
+import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Durability;
 import org.apache.hadoop.hbase.client.Put;
@@ -92,7 +93,7 @@ public class TestCompaction {
       HBaseClassTestRule.forClass(TestCompaction.class);
 
   @Rule public TestName name = new TestName();
-  private static final HBaseTestingUtility UTIL = HBaseTestingUtility.createLocalHTU();
+  private static final HBaseTestingUtility UTIL = new HBaseTestingUtility();
   protected Configuration conf = UTIL.getConfiguration();
 
   private HRegion r = null;
@@ -126,7 +127,9 @@ public class TestCompaction {
 
   @Before
   public void setUp() throws Exception {
-    this.htd = UTIL.createTableDescriptor(name.getMethodName());
+    this.htd = UTIL.createTableDescriptor(TableName.valueOf(name.getMethodName()),
+      HColumnDescriptor.DEFAULT_MIN_VERSIONS, 3, HConstants.FOREVER,
+      HColumnDescriptor.DEFAULT_KEEP_DELETED);
     if (name.getMethodName().equals("testCompactionSeqId")) {
       UTIL.getConfiguration().set("hbase.hstore.compaction.kv.max", "10");
       UTIL.getConfiguration().set(
@@ -363,7 +366,8 @@ public class TestCompaction {
   /**
    * Test no new Compaction requests are generated after calling stop compactions
    */
-  @Test public void testStopStartCompaction() throws IOException {
+  @Test
+  public void testStopStartCompaction() throws IOException {
     // setup a compact/split thread on a mock server
     HRegionServer mockServer = Mockito.mock(HRegionServer.class);
     Mockito.when(mockServer.getConfiguration()).thenReturn(r.getBaseConf());
@@ -376,19 +380,21 @@ public class TestCompaction {
       createStoreFile(r);
     }
     thread.switchCompaction(false);
-    thread
-        .requestCompaction(r, store, "test", Store.PRIORITY_USER, CompactionLifeCycleTracker.DUMMY,
-            null);
+    thread.requestCompaction(r, store, "test", Store.PRIORITY_USER,
+      CompactionLifeCycleTracker.DUMMY, null);
     assertEquals(false, thread.isCompactionsEnabled());
-    assertEquals(0, thread.getLongCompactions().getActiveCount() + thread.getShortCompactions()
-        .getActiveCount());
+    int longCompactions = thread.getLongCompactions().getActiveCount();
+    int shortCompactions = thread.getShortCompactions().getActiveCount();
+    assertEquals("longCompactions=" + longCompactions + "," +
+        "shortCompactions=" + shortCompactions, 0, longCompactions + shortCompactions);
     thread.switchCompaction(true);
     assertEquals(true, thread.isCompactionsEnabled());
-    thread
-        .requestCompaction(r, store, "test", Store.PRIORITY_USER, CompactionLifeCycleTracker.DUMMY,
-            null);
-    assertEquals(1, thread.getLongCompactions().getActiveCount() + thread.getShortCompactions()
-        .getActiveCount());
+    thread.requestCompaction(r, store, "test", Store.PRIORITY_USER,
+      CompactionLifeCycleTracker.DUMMY, null);
+    longCompactions = thread.getLongCompactions().getActiveCount();
+    shortCompactions = thread.getShortCompactions().getActiveCount();
+    assertEquals("longCompactions=" + longCompactions + "," +
+        "shortCompactions=" + shortCompactions, 1, longCompactions + shortCompactions);
   }
 
   @Test public void testInterruptingRunningCompactions() throws Exception {

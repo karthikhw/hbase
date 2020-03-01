@@ -24,8 +24,10 @@ import static org.junit.Assert.fail;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -349,11 +351,13 @@ public class TestAdmin2 extends TestAdminBase {
   private Admin createTable(TableName tableName) throws IOException {
     Admin admin = TEST_UTIL.getAdmin();
 
-    HTableDescriptor htd = new HTableDescriptor(tableName);
-    HColumnDescriptor hcd = new HColumnDescriptor("value");
+    TableDescriptorBuilder tableDescriptorBuilder =
+      TableDescriptorBuilder.newBuilder(tableName);
+    ColumnFamilyDescriptor columnFamilyDescriptor =
+      ColumnFamilyDescriptorBuilder.newBuilder(Bytes.toBytes("value")).build();
 
-    htd.addFamily(hcd);
-    admin.createTable(htd);
+    tableDescriptorBuilder.setColumnFamily(columnFamilyDescriptor);
+    admin.createTable(tableDescriptorBuilder.build());
     return admin;
   }
 
@@ -362,11 +366,13 @@ public class TestAdmin2 extends TestAdminBase {
   }
 
   private void createTableWithDefaultConf(TableName TABLENAME) throws IOException {
-    HTableDescriptor htd = new HTableDescriptor(TABLENAME);
-    HColumnDescriptor hcd = new HColumnDescriptor("value");
-    htd.addFamily(hcd);
+    TableDescriptorBuilder tableDescriptorBuilder =
+      TableDescriptorBuilder.newBuilder(TABLENAME);
+    ColumnFamilyDescriptor columnFamilyDescriptor =
+      ColumnFamilyDescriptorBuilder.newBuilder(Bytes.toBytes("value")).build();
+    tableDescriptorBuilder.setColumnFamily(columnFamilyDescriptor);
 
-    ADMIN.createTable(htd);
+    ADMIN.createTable(tableDescriptorBuilder.build());
   }
 
   /**
@@ -807,6 +813,31 @@ public class TestAdmin2 extends TestAdminBase {
     assertEquals(!initialState, prevState);
     // Current state should be the original state again
     assertEquals(initialState, ADMIN.isSnapshotCleanupEnabled());
+  }
+
+  @Test
+  public void testSlowLogResponses() throws Exception {
+    // get all live server names
+    Collection<ServerName> serverNames = ADMIN.getRegionServers();
+    List<ServerName> serverNameList = new ArrayList<>(serverNames);
+
+    // clean up slowlog responses maintained in memory by RegionServers
+    List<Boolean> areSlowLogsCleared = ADMIN.clearSlowLogResponses(new HashSet<>(serverNameList));
+
+    int countFailedClearSlowResponse = 0;
+    for (Boolean isSlowLogCleared : areSlowLogsCleared) {
+      if (!isSlowLogCleared) {
+        ++countFailedClearSlowResponse;
+      }
+    }
+    Assert.assertEquals(countFailedClearSlowResponse, 0);
+
+    SlowLogQueryFilter slowLogQueryFilter = new SlowLogQueryFilter();
+    List<SlowLogRecord> slowLogRecords = ADMIN.getSlowLogResponses(new HashSet<>(serverNames),
+      slowLogQueryFilter);
+
+    // after cleanup of slowlog responses, total count of slowlog payloads should be 0
+    Assert.assertEquals(slowLogRecords.size(), 0);
   }
 
 }

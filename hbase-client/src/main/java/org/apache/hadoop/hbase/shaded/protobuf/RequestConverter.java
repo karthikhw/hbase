@@ -27,9 +27,11 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.hbase.CellScannable;
 import org.apache.hadoop.hbase.ClusterMetrics.Option;
 import org.apache.hadoop.hbase.ClusterMetricsBuilder;
+import org.apache.hadoop.hbase.CompareOperator;
 import org.apache.hadoop.hbase.DoNotRetryIOException;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.NamespaceDescriptor;
@@ -49,11 +51,13 @@ import org.apache.hadoop.hbase.client.RegionInfo;
 import org.apache.hadoop.hbase.client.Row;
 import org.apache.hadoop.hbase.client.RowMutations;
 import org.apache.hadoop.hbase.client.Scan;
+import org.apache.hadoop.hbase.client.SlowLogQueryFilter;
 import org.apache.hadoop.hbase.client.TableDescriptor;
 import org.apache.hadoop.hbase.client.TableState;
 import org.apache.hadoop.hbase.client.replication.ReplicationPeerConfigUtil;
 import org.apache.hadoop.hbase.exceptions.DeserializationException;
-import org.apache.hadoop.hbase.filter.ByteArrayComparable;
+import org.apache.hadoop.hbase.filter.BinaryComparator;
+import org.apache.hadoop.hbase.filter.Filter;
 import org.apache.hadoop.hbase.io.TimeRange;
 import org.apache.hadoop.hbase.master.RegionState;
 import org.apache.hadoop.hbase.replication.ReplicationPeerConfig;
@@ -67,6 +71,7 @@ import org.apache.yetus.audience.InterfaceAudience;
 import org.apache.hbase.thirdparty.com.google.protobuf.UnsafeByteOperations;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.ClearCompactionQueuesRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.ClearRegionBlockCacheRequest;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.ClearSlowLogResponseRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.CompactRegionRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.FlushRegionRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.GetOnlineRegionRequest;
@@ -76,6 +81,7 @@ import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.GetServerIn
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.OpenRegionRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.OpenRegionRequest.RegionOpenInfo;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.RollWALWriterRequest;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.SlowLogResponseRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.StopServerRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.UpdateFavoredNodesRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.UpdateFavoredNodesRequest.RegionUpdateInfo;
@@ -187,71 +193,51 @@ public final class RequestConverter {
   /**
    * Create a protocol buffer MutateRequest for a conditioned put
    *
-   * @param regionName
-   * @param row
-   * @param family
-   * @param qualifier
-   * @param comparator
-   * @param compareType
-   * @param put
    * @return a mutate request
    * @throws IOException
    */
   public static MutateRequest buildMutateRequest(
-      final byte[] regionName, final byte[] row, final byte[] family,
-      final byte [] qualifier, final ByteArrayComparable comparator,
-      final CompareType compareType, TimeRange timeRange, final Put put) throws IOException {
-    return buildMutateRequest(regionName, row, family, qualifier, comparator, compareType, timeRange
-      , put, MutationType.PUT);
+    final byte[] regionName, final byte[] row, final byte[] family,
+    final byte [] qualifier, final CompareOperator op, final byte[] value, final Filter filter,
+    final TimeRange timeRange, final Put put) throws IOException {
+    return buildMutateRequest(regionName, row, family, qualifier, op, value, filter, timeRange,
+      put, MutationType.PUT);
   }
 
   /**
    * Create a protocol buffer MutateRequest for a conditioned delete
    *
-   * @param regionName
-   * @param row
-   * @param family
-   * @param qualifier
-   * @param comparator
-   * @param compareType
-   * @param delete
    * @return a mutate request
    * @throws IOException
    */
   public static MutateRequest buildMutateRequest(
-      final byte[] regionName, final byte[] row, final byte[] family,
-      final byte [] qualifier, final ByteArrayComparable comparator,
-      final CompareType compareType, TimeRange timeRange, final Delete delete) throws IOException {
-    return buildMutateRequest(regionName, row, family, qualifier, comparator, compareType, timeRange
-      , delete, MutationType.DELETE);
+    final byte[] regionName, final byte[] row, final byte[] family,
+    final byte [] qualifier, final CompareOperator op, final byte[] value, final Filter filter,
+    final TimeRange timeRange, final Delete delete) throws IOException {
+    return buildMutateRequest(regionName, row, family, qualifier, op, value, filter, timeRange,
+      delete, MutationType.DELETE);
   }
 
   public static MutateRequest buildMutateRequest(final byte[] regionName, final byte[] row,
-    final byte[] family, final byte[] qualifier, final ByteArrayComparable comparator,
-    final CompareType compareType, TimeRange timeRange, final Mutation mutation,
+    final byte[] family, final byte[] qualifier, final CompareOperator op, final byte[] value,
+    final Filter filter, final TimeRange timeRange, final Mutation mutation,
     final MutationType type) throws IOException {
     return MutateRequest.newBuilder()
       .setRegion(buildRegionSpecifier(RegionSpecifierType.REGION_NAME, regionName))
       .setMutation(ProtobufUtil.toMutation(type, mutation))
-      .setCondition(buildCondition(row, family, qualifier, comparator, compareType, timeRange))
+      .setCondition(buildCondition(row, family, qualifier, op, value, filter, timeRange))
       .build();
   }
+
   /**
    * Create a protocol buffer MutateRequest for conditioned row mutations
    *
-   * @param regionName
-   * @param row
-   * @param family
-   * @param qualifier
-   * @param comparator
-   * @param compareType
-   * @param rowMutations
    * @return a mutate request
    * @throws IOException
    */
   public static ClientProtos.MultiRequest buildMutateRequest(final byte[] regionName,
     final byte[] row, final byte[] family, final byte[] qualifier,
-    final ByteArrayComparable comparator, final CompareType compareType, final TimeRange timeRange,
+    final CompareOperator op, final byte[] value, final Filter filter, final TimeRange timeRange,
     final RowMutations rowMutations) throws IOException {
     RegionAction.Builder builder =
         getRegionActionBuilderWithRegion(RegionAction.newBuilder(), regionName);
@@ -259,7 +245,7 @@ public final class RequestConverter {
     ClientProtos.Action.Builder actionBuilder = ClientProtos.Action.newBuilder();
     MutationProto.Builder mutationBuilder = MutationProto.newBuilder();
     for (Mutation mutation: rowMutations.getMutations()) {
-      MutationType mutateType = null;
+      MutationType mutateType;
       if (mutation instanceof Put) {
         mutateType = MutationType.PUT;
       } else if (mutation instanceof Delete) {
@@ -275,7 +261,7 @@ public final class RequestConverter {
       builder.addAction(actionBuilder.build());
     }
     return ClientProtos.MultiRequest.newBuilder().addRegionAction(builder.build())
-        .setCondition(buildCondition(row, family, qualifier, comparator, compareType, timeRange))
+        .setCondition(buildCondition(row, family, qualifier, op, value, filter, timeRange))
         .build();
   }
 
@@ -918,25 +904,26 @@ public final class RequestConverter {
   /**
    * Create a protocol buffer Condition
    *
-   * @param row
-   * @param family
-   * @param qualifier
-   * @param comparator
-   * @param compareType
    * @return a Condition
    * @throws IOException
    */
   public static Condition buildCondition(final byte[] row, final byte[] family,
-    final byte[] qualifier, final ByteArrayComparable comparator, final CompareType compareType,
-    final TimeRange timeRange) {
-    return Condition.newBuilder().setRow(UnsafeByteOperations.unsafeWrap(row))
-      .setFamily(UnsafeByteOperations.unsafeWrap(family))
-      .setQualifier(UnsafeByteOperations.unsafeWrap(qualifier == null ?
-        HConstants.EMPTY_BYTE_ARRAY : qualifier))
-      .setComparator(ProtobufUtil.toComparator(comparator))
-      .setCompareType(compareType)
-      .setTimeRange(ProtobufUtil.toTimeRange(timeRange))
-      .build();
+    final byte[] qualifier, final CompareOperator op, final byte[] value, final Filter filter,
+    final TimeRange timeRange) throws IOException {
+
+    Condition.Builder builder = Condition.newBuilder().setRow(UnsafeByteOperations.unsafeWrap(row));
+
+    if (filter != null) {
+      builder.setFilter(ProtobufUtil.toFilter(filter));
+    } else {
+      builder.setFamily(UnsafeByteOperations.unsafeWrap(family))
+        .setQualifier(UnsafeByteOperations.unsafeWrap(
+          qualifier == null ? HConstants.EMPTY_BYTE_ARRAY : qualifier))
+        .setComparator(ProtobufUtil.toComparator(new BinaryComparator(value)))
+        .setCompareType(CompareType.valueOf(op.name()));
+    }
+
+    return builder.setTimeRange(ProtobufUtil.toTimeRange(timeRange)).build();
   }
 
   /**
@@ -1760,6 +1747,46 @@ public final class RequestConverter {
    */
   public static IsSnapshotCleanupEnabledRequest buildIsSnapshotCleanupEnabledRequest() {
     return IsSnapshotCleanupEnabledRequest.newBuilder().build();
+  }
+
+  /**
+   * Create a protocol buffer {@link SlowLogResponseRequest}
+   *
+   * @param slowLogQueryFilter filter to use if provided
+   * @return a protocol buffer SlowLogResponseRequest
+   */
+  public static SlowLogResponseRequest buildSlowLogResponseRequest(
+      final SlowLogQueryFilter slowLogQueryFilter) {
+    SlowLogResponseRequest.Builder builder = SlowLogResponseRequest.newBuilder();
+    if (slowLogQueryFilter == null) {
+      return builder.build();
+    }
+    final String clientAddress = slowLogQueryFilter.getClientAddress();
+    if (StringUtils.isNotEmpty(clientAddress)) {
+      builder.setClientAddress(clientAddress);
+    }
+    final String regionName = slowLogQueryFilter.getRegionName();
+    if (StringUtils.isNotEmpty(regionName)) {
+      builder.setRegionName(regionName);
+    }
+    final String tableName = slowLogQueryFilter.getTableName();
+    if (StringUtils.isNotEmpty(tableName)) {
+      builder.setTableName(tableName);
+    }
+    final String userName = slowLogQueryFilter.getUserName();
+    if (StringUtils.isNotEmpty(userName)) {
+      builder.setUserName(userName);
+    }
+    return builder.setLimit(slowLogQueryFilter.getLimit()).build();
+  }
+
+  /**
+   * Create a protocol buffer {@link ClearSlowLogResponseRequest}
+   *
+   * @return a protocol buffer ClearSlowLogResponseRequest
+   */
+  public static ClearSlowLogResponseRequest buildClearSlowLogResponseRequest() {
+    return ClearSlowLogResponseRequest.newBuilder().build();
   }
 
 }
