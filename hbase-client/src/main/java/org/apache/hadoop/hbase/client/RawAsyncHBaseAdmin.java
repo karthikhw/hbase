@@ -78,6 +78,7 @@ import org.apache.hadoop.hbase.client.replication.TableCFs;
 import org.apache.hadoop.hbase.client.security.SecurityCapability;
 import org.apache.hadoop.hbase.exceptions.DeserializationException;
 import org.apache.hadoop.hbase.ipc.HBaseRpcController;
+import org.apache.hadoop.hbase.net.Address;
 import org.apache.hadoop.hbase.quotas.QuotaFilter;
 import org.apache.hadoop.hbase.quotas.QuotaSettings;
 import org.apache.hadoop.hbase.quotas.QuotaTableUtil;
@@ -86,6 +87,7 @@ import org.apache.hadoop.hbase.replication.ReplicationException;
 import org.apache.hadoop.hbase.replication.ReplicationPeerConfig;
 import org.apache.hadoop.hbase.replication.ReplicationPeerDescription;
 import org.apache.hadoop.hbase.replication.SyncReplicationState;
+import org.apache.hadoop.hbase.rsgroup.RSGroupInfo;
 import org.apache.hadoop.hbase.security.access.GetUserPermissionsRequest;
 import org.apache.hadoop.hbase.security.access.Permission;
 import org.apache.hadoop.hbase.security.access.ShadedAccessControlUtil;
@@ -96,6 +98,7 @@ import org.apache.hadoop.hbase.snapshot.SnapshotCreationException;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.ForeignExceptionUtil;
+import org.apache.hadoop.hbase.util.Pair;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -206,8 +209,7 @@ import org.apache.hadoop.hbase.shaded.protobuf.generated.MasterProtos.IsProcedur
 import org.apache.hadoop.hbase.shaded.protobuf.generated.MasterProtos.IsProcedureDoneResponse;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.MasterProtos.IsRpcThrottleEnabledRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.MasterProtos.IsRpcThrottleEnabledResponse;
-import org.apache.hadoop.hbase.shaded.protobuf.generated.MasterProtos
-    .IsSnapshotCleanupEnabledResponse;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.MasterProtos.IsSnapshotCleanupEnabledResponse;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.MasterProtos.IsSnapshotDoneRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.MasterProtos.IsSnapshotDoneResponse;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.MasterProtos.IsSplitOrMergeEnabledRequest;
@@ -258,8 +260,7 @@ import org.apache.hadoop.hbase.shaded.protobuf.generated.MasterProtos.SetNormali
 import org.apache.hadoop.hbase.shaded.protobuf.generated.MasterProtos.SetNormalizerRunningResponse;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.MasterProtos.SetQuotaRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.MasterProtos.SetQuotaResponse;
-import org.apache.hadoop.hbase.shaded.protobuf.generated.MasterProtos
-    .SetSnapshotCleanupResponse;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.MasterProtos.SetSnapshotCleanupResponse;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.MasterProtos.SetSplitOrMergeEnabledRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.MasterProtos.SetSplitOrMergeEnabledResponse;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.MasterProtos.ShutdownRequest;
@@ -285,6 +286,28 @@ import org.apache.hadoop.hbase.shaded.protobuf.generated.QuotaProtos.GetSpaceQuo
 import org.apache.hadoop.hbase.shaded.protobuf.generated.QuotaProtos.GetSpaceQuotaRegionSizesResponse.RegionSizes;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.QuotaProtos.GetSpaceQuotaSnapshotsRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.QuotaProtos.GetSpaceQuotaSnapshotsResponse;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RSGroupAdminProtos.AddRSGroupRequest;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RSGroupAdminProtos.AddRSGroupResponse;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RSGroupAdminProtos.BalanceRSGroupRequest;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RSGroupAdminProtos.BalanceRSGroupResponse;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RSGroupAdminProtos.GetConfiguredNamespacesAndTablesInRSGroupRequest;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RSGroupAdminProtos.GetConfiguredNamespacesAndTablesInRSGroupResponse;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RSGroupAdminProtos.GetRSGroupInfoOfServerRequest;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RSGroupAdminProtos.GetRSGroupInfoOfServerResponse;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RSGroupAdminProtos.GetRSGroupInfoOfTableRequest;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RSGroupAdminProtos.GetRSGroupInfoOfTableResponse;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RSGroupAdminProtos.GetRSGroupInfoRequest;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RSGroupAdminProtos.GetRSGroupInfoResponse;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RSGroupAdminProtos.ListRSGroupInfosRequest;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RSGroupAdminProtos.ListRSGroupInfosResponse;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RSGroupAdminProtos.ListTablesInRSGroupRequest;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RSGroupAdminProtos.ListTablesInRSGroupResponse;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RSGroupAdminProtos.MoveServersRequest;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RSGroupAdminProtos.MoveServersResponse;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RSGroupAdminProtos.RemoveRSGroupRequest;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RSGroupAdminProtos.RemoveRSGroupResponse;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RSGroupAdminProtos.RemoveServersRequest;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RSGroupAdminProtos.RemoveServersResponse;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.ReplicationProtos.AddReplicationPeerRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.ReplicationProtos.AddReplicationPeerResponse;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.ReplicationProtos.DisableReplicationPeerRequest;
@@ -317,6 +340,7 @@ import org.apache.hadoop.hbase.shaded.protobuf.generated.SnapshotProtos;
  */
 @InterfaceAudience.Private
 class RawAsyncHBaseAdmin implements AsyncAdmin {
+
   public static final String FLUSH_TABLE_PROCEDURE_SIGNATURE = "flush-table-proc";
 
   private static final Logger LOG = LoggerFactory.getLogger(AsyncHBaseAdmin.class);
@@ -3858,23 +3882,70 @@ class RawAsyncHBaseAdmin implements AsyncAdmin {
   @Override
   public CompletableFuture<Boolean> snapshotCleanupSwitch(final boolean on,
       final boolean sync) {
-    return this.<Boolean>newMasterCaller()
-        .action((controller, stub) -> this
-            .call(controller, stub,
-                RequestConverter.buildSetSnapshotCleanupRequest(on, sync),
-                MasterService.Interface::switchSnapshotCleanup,
-                SetSnapshotCleanupResponse::getPrevSnapshotCleanup))
-        .call();
+    return this.<Boolean>newMasterCaller().action((controller, stub) -> this
+        .call(controller, stub, RequestConverter.buildSetSnapshotCleanupRequest(on, sync),
+            MasterService.Interface::switchSnapshotCleanup,
+            SetSnapshotCleanupResponse::getPrevSnapshotCleanup)).call();
   }
 
   @Override
   public CompletableFuture<Boolean> isSnapshotCleanupEnabled() {
-    return this.<Boolean>newMasterCaller()
+    return this.<Boolean>newMasterCaller().action((controller, stub) -> this
+        .call(controller, stub, RequestConverter.buildIsSnapshotCleanupEnabledRequest(),
+            MasterService.Interface::isSnapshotCleanupEnabled,
+            IsSnapshotCleanupEnabledResponse::getEnabled)).call();
+  }
+
+  @Override
+  public CompletableFuture<Void> moveServersToRSGroup(Set<Address> servers, String groupName) {
+    return this.<Void> newMasterCaller()
+        .action((controller, stub) -> this.
+            <MoveServersRequest, MoveServersResponse, Void> call(controller, stub,
+                RequestConverter.buildMoveServersRequest(servers, groupName),
+              (s, c, req, done) -> s.moveServers(c, req, done), resp -> null))
+        .call();
+  }
+
+  @Override
+  public CompletableFuture<Void> addRSGroup(String groupName) {
+    return this.<Void> newMasterCaller()
+        .action(((controller, stub) -> this.
+            <AddRSGroupRequest, AddRSGroupResponse, Void> call(controller, stub,
+                AddRSGroupRequest.newBuilder().setRSGroupName(groupName).build(),
+              (s, c, req, done) -> s.addRSGroup(c, req, done), resp -> null)))
+        .call();
+  }
+
+  @Override
+  public CompletableFuture<Void> removeRSGroup(String groupName) {
+    return this.<Void> newMasterCaller()
+        .action((controller, stub) -> this.
+            <RemoveRSGroupRequest, RemoveRSGroupResponse, Void> call(controller, stub,
+                RemoveRSGroupRequest.newBuilder().setRSGroupName(groupName).build(),
+              (s, c, req, done) -> s.removeRSGroup(c, req, done), resp -> null))
+        .call();
+  }
+
+  @Override
+  public CompletableFuture<Boolean> balanceRSGroup(String groupName) {
+    return this.<Boolean> newMasterCaller()
+        .action((controller, stub) -> this.
+            <BalanceRSGroupRequest, BalanceRSGroupResponse, Boolean> call(controller, stub,
+                BalanceRSGroupRequest.newBuilder().setRSGroupName(groupName).build(),
+              (s, c, req, done) -> s.balanceRSGroup(c, req, done), resp -> resp.getBalanceRan()))
+        .call();
+  }
+
+  @Override
+  public CompletableFuture<List<RSGroupInfo>> listRSGroups() {
+    return this.<List<RSGroupInfo>> newMasterCaller()
         .action((controller, stub) -> this
-            .call(controller, stub,
-                RequestConverter.buildIsSnapshotCleanupEnabledRequest(),
-                MasterService.Interface::isSnapshotCleanupEnabled,
-                IsSnapshotCleanupEnabledResponse::getEnabled))
+            .<ListRSGroupInfosRequest, ListRSGroupInfosResponse, List<RSGroupInfo>> call(
+                controller, stub, ListRSGroupInfosRequest.getDefaultInstance(),
+              (s, c, req, done) -> s.listRSGroupInfos(c, req, done),
+              resp -> resp.getRSGroupInfoList().stream()
+                  .map(r -> ProtobufUtil.toGroupInfo(r))
+                  .collect(Collectors.toList())))
         .call();
   }
 
@@ -3937,4 +4008,120 @@ class RawAsyncHBaseAdmin implements AsyncAdmin {
     );
   }
 
+  @Override
+  public CompletableFuture<List<TableName>> listTablesInRSGroup(String groupName) {
+    return this.<List<TableName>> newMasterCaller()
+      .action((controller, stub) -> this
+        .<ListTablesInRSGroupRequest, ListTablesInRSGroupResponse, List<TableName>> call(controller,
+          stub, ListTablesInRSGroupRequest.newBuilder().setGroupName(groupName).build(),
+          (s, c, req, done) -> s.listTablesInRSGroup(c, req, done), resp -> resp.getTableNameList()
+            .stream().map(ProtobufUtil::toTableName).collect(Collectors.toList())))
+      .call();
+  }
+
+  @Override
+  public CompletableFuture<Pair<List<String>, List<TableName>>>
+    getConfiguredNamespacesAndTablesInRSGroup(String groupName) {
+    return this.<Pair<List<String>, List<TableName>>> newMasterCaller()
+      .action((controller, stub) -> this
+        .<GetConfiguredNamespacesAndTablesInRSGroupRequest,
+          GetConfiguredNamespacesAndTablesInRSGroupResponse,
+          Pair<List<String>, List<TableName>>> call(controller, stub,
+          GetConfiguredNamespacesAndTablesInRSGroupRequest.newBuilder().setGroupName(groupName)
+            .build(),
+            (s, c, req, done) -> s.getConfiguredNamespacesAndTablesInRSGroup(c, req, done),
+            resp -> Pair.newPair(resp.getNamespaceList(), resp.getTableNameList().stream()
+              .map(ProtobufUtil::toTableName).collect(Collectors.toList()))))
+      .call();
+  }
+
+  @Override
+  public CompletableFuture<RSGroupInfo> getRSGroup(Address hostPort) {
+    return this.<RSGroupInfo> newMasterCaller()
+      .action(((controller, stub) -> this
+        .<GetRSGroupInfoOfServerRequest, GetRSGroupInfoOfServerResponse, RSGroupInfo> call(
+          controller, stub,
+          GetRSGroupInfoOfServerRequest.newBuilder()
+            .setServer(HBaseProtos.ServerName.newBuilder().setHostName(hostPort.getHostname())
+              .setPort(hostPort.getPort()).build())
+            .build(),
+          (s, c, req, done) -> s.getRSGroupInfoOfServer(c, req, done),
+          resp -> resp.hasRSGroupInfo() ? ProtobufUtil.toGroupInfo(resp.getRSGroupInfo()) : null)))
+      .call();
+  }
+
+  @Override
+  public CompletableFuture<Void> removeServersFromRSGroup(Set<Address> servers) {
+    return this.<Void> newMasterCaller()
+      .action((controller, stub) -> this.
+            <RemoveServersRequest, RemoveServersResponse, Void> call(controller, stub,
+                RequestConverter.buildRemoveServersRequest(servers),
+              (s, c, req, done) -> s.removeServers(c, req, done), resp -> null))
+        .call();
+  }
+
+  @Override
+  public CompletableFuture<Void> setRSGroup(Set<TableName> tables, String groupName) {
+    CompletableFuture<Void> future = new CompletableFuture<>();
+    for (TableName tableName : tables) {
+      addListener(tableExists(tableName), (exist, err) -> {
+        if (err != null) {
+          future.completeExceptionally(err);
+          return;
+        }
+        if (!exist) {
+          future.completeExceptionally(new TableNotFoundException(tableName));
+          return;
+        }
+      });
+    }
+    addListener(listTableDescriptors(new ArrayList<>(tables)), ((tableDescriptions, err) -> {
+      if (err != null) {
+        future.completeExceptionally(err);
+        return;
+      }
+      if (tableDescriptions == null || tableDescriptions.isEmpty()) {
+        future.complete(null);
+        return;
+      }
+      List<TableDescriptor> newTableDescriptors = new ArrayList<>();
+      for (TableDescriptor td : tableDescriptions) {
+        newTableDescriptors
+            .add(TableDescriptorBuilder.newBuilder(td).setRegionServerGroup(groupName).build());
+      }
+      addListener(CompletableFuture.allOf(
+        newTableDescriptors.stream().map(this::modifyTable).toArray(CompletableFuture[]::new)),
+        (v, e) -> {
+          if (e != null) {
+            future.completeExceptionally(e);
+          } else {
+            future.complete(v);
+          }
+        });
+    }));
+    return future;
+  }
+
+  @Override
+  public CompletableFuture<RSGroupInfo> getRSGroup(TableName table) {
+    return this.<RSGroupInfo> newMasterCaller().action(((controller, stub) -> this
+      .<GetRSGroupInfoOfTableRequest, GetRSGroupInfoOfTableResponse, RSGroupInfo> call(controller,
+        stub,
+        GetRSGroupInfoOfTableRequest.newBuilder().setTableName(ProtobufUtil.toProtoTableName(table))
+          .build(),
+        (s, c, req, done) -> s.getRSGroupInfoOfTable(c, req, done),
+        resp -> resp.hasRSGroupInfo() ? ProtobufUtil.toGroupInfo(resp.getRSGroupInfo()) : null)))
+      .call();
+  }
+
+  @Override
+  public CompletableFuture<RSGroupInfo> getRSGroup(String groupName) {
+    return this.<RSGroupInfo> newMasterCaller()
+      .action(((controller, stub) -> this
+        .<GetRSGroupInfoRequest, GetRSGroupInfoResponse, RSGroupInfo> call(controller, stub,
+          GetRSGroupInfoRequest.newBuilder().setRSGroupName(groupName).build(),
+          (s, c, req, done) -> s.getRSGroupInfo(c, req, done),
+          resp -> resp.hasRSGroupInfo() ? ProtobufUtil.toGroupInfo(resp.getRSGroupInfo()) : null)))
+      .call();
+  }
 }
