@@ -18,11 +18,10 @@
 package org.apache.hadoop.hbase.ipc;
 
 import java.io.Closeable;
-import java.io.IOException;
-import java.util.Set;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.security.User;
 import org.apache.yetus.audience.InterfaceAudience;
+
 import org.apache.hbase.thirdparty.com.google.protobuf.BlockingRpcChannel;
 import org.apache.hbase.thirdparty.com.google.protobuf.RpcChannel;
 
@@ -64,10 +63,8 @@ public interface RpcClient extends Closeable {
    * @param rpcTimeout default rpc operation timeout
    *
    * @return A blocking rpc channel that goes via this rpc client instance.
-   * @throws IOException when channel could not be created
    */
-  BlockingRpcChannel createBlockingRpcChannel(ServerName sn, User user, int rpcTimeout)
-      throws IOException;
+  BlockingRpcChannel createBlockingRpcChannel(ServerName sn, User user, int rpcTimeout);
 
   /**
    * Creates a "channel" that can be used by a protobuf service.  Useful setting up
@@ -79,18 +76,7 @@ public interface RpcClient extends Closeable {
    *
    * @return A rpc channel that goes via this rpc client instance.
    */
-  RpcChannel createRpcChannel(final ServerName sn, final User user, int rpcTimeout)
-      throws IOException;
-
-  /**
-   * Creates a channel that can hedge request to multiple underlying channels.
-   * @param sns  Set of servers for underlying channels.
-   * @param user user for the connection.
-   * @param rpcTimeout rpc timeout to use.
-   * @return A hedging rpc channel for this rpc client instance.
-   */
-  RpcChannel createHedgedRpcChannel(final Set<ServerName> sns, final User user, int rpcTimeout)
-       throws IOException;
+  RpcChannel createRpcChannel(final ServerName sn, final User user, int rpcTimeout);
 
   /**
    * Interrupt the connections to the given server. This should be called if the server

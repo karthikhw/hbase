@@ -32,7 +32,6 @@ import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
-import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionLocation;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
@@ -45,8 +44,6 @@ import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import org.apache.hbase.thirdparty.com.google.common.annotations.VisibleForTesting;
 
 /**
  * RegionStates contains a set of Maps that describes the in-memory state of the AM, with
@@ -116,7 +113,6 @@ public class RegionStates {
     serverMap.clear();
   }
 
-  @VisibleForTesting
   public boolean isRegionInRegionStates(final RegionInfo hri) {
     return (regionsMap.containsKey(hri.getRegionName()) || regionInTransition.containsKey(hri)
         || regionOffline.containsKey(hri));
@@ -125,12 +121,15 @@ public class RegionStates {
   // ==========================================================================
   //  RegionStateNode helpers
   // ==========================================================================
-  @VisibleForTesting
   RegionStateNode createRegionStateNode(RegionInfo regionInfo) {
     synchronized (regionsMapLock) {
       RegionStateNode node = regionsMap.computeIfAbsent(regionInfo.getRegionName(),
         key -> new RegionStateNode(regionInfo, regionInTransition));
-      encodedRegionsMap.putIfAbsent(regionInfo.getEncodedName(), node);
+
+      if (encodedRegionsMap.get(regionInfo.getEncodedName()) != node) {
+        encodedRegionsMap.put(regionInfo.getEncodedName(), node);
+      }
+
       return node;
     }
   }
@@ -170,7 +169,7 @@ public class RegionStates {
     regionInfos.forEach(this::deleteRegion);
   }
 
-  ArrayList<RegionStateNode> getTableRegionStateNodes(final TableName tableName) {
+  List<RegionStateNode> getTableRegionStateNodes(final TableName tableName) {
     final ArrayList<RegionStateNode> regions = new ArrayList<RegionStateNode>();
     for (RegionStateNode node: regionsMap.tailMap(tableName.getName()).values()) {
       if (!node.getTable().equals(tableName)) break;
@@ -238,8 +237,10 @@ public class RegionStates {
   /**
    * @return Return online regions of table; does not include OFFLINE or SPLITTING regions.
    */
-  public List<RegionInfo> getRegionsOfTable(final TableName table) {
-    return getRegionsOfTable(table, false);
+  public List<RegionInfo> getRegionsOfTable(TableName table) {
+    return getRegionsOfTable(table,
+      regionNode -> !regionNode.isInState(State.OFFLINE, State.SPLIT) &&
+        !regionNode.getRegionInfo().isSplitParent());
   }
 
   private HRegionLocation createRegionForReopen(RegionStateNode node) {
@@ -343,16 +344,34 @@ public class RegionStates {
   }
 
   /**
-   * @return Return online regions of table; does not include OFFLINE or SPLITTING regions.
+   * Get the regions for enabling a table.
+   * <p/>
+   * Here we want the EnableTableProcedure to be more robust and can be used to fix some nasty
+   * states, so the checks in this method will be a bit strange. In general, a region can only be
+   * offline when it is split, for merging we will just delete the parent regions, but with HBCK we
+   * may force update the state of a region to fix some nasty bugs, so in this method we will try to
+   * bring the offline regions back if it is not split. That's why we only check for split state
+   * here.
    */
-  public List<RegionInfo> getRegionsOfTable(TableName table, boolean offline) {
-    return getRegionsOfTable(table, state -> include(state, offline));
+  public List<RegionInfo> getRegionsOfTableForEnabling(TableName table) {
+    return getRegionsOfTable(table,
+      regionNode -> !regionNode.isInState(State.SPLIT) && !regionNode.getRegionInfo().isSplit());
   }
 
   /**
-   * @return Return the regions of the table; does not include OFFLINE unless you set
-   *         <code>offline</code> to true. Does not include regions that are in the
-   *         {@link State#SPLIT} state.
+   * Get the regions for deleting a table.
+   * <p/>
+   * Here we need to return all the regions irrespective of the states in order to archive them
+   * all. This is because if we don't archive OFFLINE/SPLIT regions and if a snapshot or a cloned
+   * table references to the regions, we will lose the data of the regions.
+   */
+  public List<RegionInfo> getRegionsOfTableForDeleting(TableName table) {
+    return getTableRegionStateNodes(table).stream().map(RegionStateNode::getRegionInfo)
+      .collect(Collectors.toList());
+  }
+
+  /**
+   * @return Return the regions of the table and filter them.
    */
   private List<RegionInfo> getRegionsOfTable(TableName table, Predicate<RegionStateNode> filter) {
     return getTableRegionStateNodes(table).stream().filter(filter).map(n -> n.getRegionInfo())
@@ -365,7 +384,7 @@ public class RegionStates {
    * @return True if we should include the <code>node</code> (do not include
    * if split or offline unless <code>offline</code> is set to true.
    */
-  boolean include(final RegionStateNode node, final boolean offline) {
+  private boolean include(final RegionStateNode node, final boolean offline) {
     if (LOG.isTraceEnabled()) {
       LOG.trace("WORKING ON " + node + " " + node.getRegionInfo());
     }
@@ -552,61 +571,42 @@ public class RegionStates {
    * wants to iterate this exported list.  We need to synchronize on regions
    * since all access to this.servers is under a lock on this.regions.
    *
-   * @param isByTable If <code>true</code>, return the assignments by table. If <code>false</code>,
-   *                  return the assignments which aggregate the server-load to the cluster level.
    * @return A clone of current assignments.
    */
   public Map<TableName, Map<ServerName, List<RegionInfo>>> getAssignmentsForBalancer(
-    TableStateManager tableStateManager, List<ServerName> onlineServers, boolean isByTable) {
+      TableStateManager tableStateManager, List<ServerName> onlineServers) {
     final Map<TableName, Map<ServerName, List<RegionInfo>>> result = new HashMap<>();
-    if (isByTable) {
-      for (RegionStateNode node : regionsMap.values()) {
-        if (isTableDisabled(tableStateManager, node.getTable())) {
-          continue;
-        }
-        if (node.getRegionInfo().isSplitParent()) {
-          continue;
-        }
-        Map<ServerName, List<RegionInfo>> tableResult =
-            result.computeIfAbsent(node.getTable(), t -> new HashMap<>());
-        final ServerName serverName = node.getRegionLocation();
-        if (serverName == null) {
-          LOG.info("Skipping, no server for " + node);
-          continue;
-        }
-        List<RegionInfo> serverResult =
-            tableResult.computeIfAbsent(serverName, s -> new ArrayList<>());
-        serverResult.add(node.getRegionInfo());
+    for (RegionStateNode node : regionsMap.values()) {
+      if (isTableDisabled(tableStateManager, node.getTable())) {
+        continue;
       }
-      // Add online servers with no assignment for the table.
-      for (Map<ServerName, List<RegionInfo>> table : result.values()) {
-        for (ServerName serverName : onlineServers) {
-          table.computeIfAbsent(serverName, key -> new ArrayList<>());
-        }
+      if (node.getRegionInfo().isSplitParent()) {
+        continue;
       }
-    } else {
-      final HashMap<ServerName, List<RegionInfo>> ensemble = new HashMap<>(serverMap.size());
+      Map<ServerName, List<RegionInfo>> tableResult =
+          result.computeIfAbsent(node.getTable(), t -> new HashMap<>());
+      final ServerName serverName = node.getRegionLocation();
+      if (serverName == null) {
+        LOG.info("Skipping, no server for " + node);
+        continue;
+      }
+      List<RegionInfo> serverResult =
+          tableResult.computeIfAbsent(serverName, s -> new ArrayList<>());
+      serverResult.add(node.getRegionInfo());
+    }
+    // Add online servers with no assignment for the table.
+    for (Map<ServerName, List<RegionInfo>> table : result.values()) {
       for (ServerName serverName : onlineServers) {
-        ServerStateNode serverNode = serverMap.get(serverName);
-        if (serverNode != null) {
-          ensemble.put(serverNode.getServerName(),
-            serverNode.getRegionInfoList().stream()
-                .filter(region -> !isTableDisabled(tableStateManager, region.getTable()))
-                .filter(region -> !region.isSplitParent()).collect(Collectors.toList()));
-        } else {
-          ensemble.put(serverName, new ArrayList<>());
-        }
+        table.computeIfAbsent(serverName, key -> new ArrayList<>());
       }
-      // Use a fake table name to represent the whole cluster's assignments
-      result.put(HConstants.ENSEMBLE_TABLE_NAME, ensemble);
     }
     return result;
   }
 
   private boolean isTableDisabled(final TableStateManager tableStateManager,
-    final TableName tableName) {
-    return tableStateManager
-      .isTableState(tableName, TableState.State.DISABLED, TableState.State.DISABLING);
+      final TableName tableName) {
+    return tableStateManager.isTableState(tableName, TableState.State.DISABLED,
+      TableState.State.DISABLING);
   }
 
   // ==========================================================================
@@ -760,7 +760,6 @@ public class RegionStates {
   /**
    * @return Pertinent ServerStateNode or NULL if none found (Do not make modifications).
    */
-  @VisibleForTesting
   public ServerStateNode getServerNode(final ServerName serverName) {
     return serverMap.get(serverName);
   }

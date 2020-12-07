@@ -26,6 +26,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
@@ -35,8 +36,6 @@ import org.apache.hadoop.hbase.util.ImmutableByteArray;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import org.apache.hbase.thirdparty.com.google.common.annotations.VisibleForTesting;
 
 /**
  * Accounting of sequence ids per region and then by column family. So we can keep our accounting
@@ -239,7 +238,6 @@ class SequenceIdAccounting {
     }
   }
 
-  @VisibleForTesting
   ConcurrentMap<ImmutableByteArray, Long> getOrCreateLowestSequenceIds(byte[] encodedRegionName) {
     // Intentionally, this access is done outside of this.regionSequenceIdLock. Done per append.
     return computeIfAbsent(this.lowestUnflushedSequenceIds, encodedRegionName,
@@ -351,9 +349,36 @@ class SequenceIdAccounting {
     return lowestUnflushedInRegion;
   }
 
-  void completeCacheFlush(final byte[] encodedRegionName) {
+  void completeCacheFlush(byte[] encodedRegionName, long maxFlushedSeqId) {
+    // This is a simple hack to avoid maxFlushedSeqId go backwards.
+    // The system works fine normally, but if we make use of Durability.ASYNC_WAL and we are going
+    // to flush all the stores, the maxFlushedSeqId will be next seq id of the region, but we may
+    // still have some unsynced WAL entries in the ringbuffer after we call startCacheFlush, and
+    // then it will be recorded as the lowestUnflushedSeqId by the above update method, which is
+    // less than the current maxFlushedSeqId. And if next time we only flush the family with this
+    // unusual lowestUnflushedSeqId, the maxFlushedSeqId will go backwards.
+    // This is an unexpected behavior so we should fix it, otherwise it may cause unexpected
+    // behavior in other area.
+    // The solution here is a bit hack but fine. Just replace the lowestUnflushedSeqId with
+    // maxFlushedSeqId + 1 if it is lesser. The meaning of maxFlushedSeqId is that, all edits less
+    // than or equal to it have been flushed, i.e, persistent to HFile, so set
+    // lowestUnflushedSequenceId to maxFlushedSeqId + 1 will not cause data loss.
+    // And technically, using +1 is fine here. If the maxFlushesSeqId is just the flushOpSeqId, it
+    // means we have flushed all the stores so the seq id for actual data should be at least plus 1.
+    // And if we do not flush all the stores, then the maxFlushedSeqId is calculated by
+    // lowestUnflushedSeqId - 1, so here let's plus the 1 back.
+    Long wrappedSeqId = Long.valueOf(maxFlushedSeqId + 1);
     synchronized (tieLock) {
       this.flushingSequenceIds.remove(encodedRegionName);
+      Map<ImmutableByteArray, Long> unflushed = lowestUnflushedSequenceIds.get(encodedRegionName);
+      if (unflushed == null) {
+        return;
+      }
+      for (Map.Entry<ImmutableByteArray, Long> e : unflushed.entrySet()) {
+        if (e.getValue().longValue() <= maxFlushedSeqId) {
+          e.setValue(wrappedSeqId);
+        }
+      }
     }
   }
 
@@ -440,10 +465,10 @@ class SequenceIdAccounting {
    * {@link #lowestUnflushedSequenceIds} has a sequence id less than that passed in
    * <code>sequenceids</code> then return it.
    * @param sequenceids Sequenceids keyed by encoded region name.
-   * @return regions found in this instance with sequence ids less than those passed in.
+   * @return stores of regions found in this instance with sequence ids less than those passed in.
    */
-  byte[][] findLower(Map<byte[], Long> sequenceids) {
-    List<byte[]> toFlush = null;
+  Map<byte[], List<byte[]>> findLower(Map<byte[], Long> sequenceids) {
+    Map<byte[], List<byte[]>> toFlush = null;
     // Keeping the old behavior of iterating unflushedSeqNums under oldestSeqNumsLock.
     synchronized (tieLock) {
       for (Map.Entry<byte[], Long> e : sequenceids.entrySet()) {
@@ -451,16 +476,17 @@ class SequenceIdAccounting {
         if (m == null) {
           continue;
         }
-        // The lowest sequence id outstanding for this region.
-        long lowest = getLowestSequenceId(m);
-        if (lowest != HConstants.NO_SEQNUM && lowest <= e.getValue()) {
-          if (toFlush == null) {
-            toFlush = new ArrayList<>();
+        for (Map.Entry<ImmutableByteArray, Long> me : m.entrySet()) {
+          if (me.getValue() <= e.getValue()) {
+            if (toFlush == null) {
+              toFlush = new TreeMap(Bytes.BYTES_COMPARATOR);
+            }
+            toFlush.computeIfAbsent(e.getKey(), k -> new ArrayList<>())
+              .add(Bytes.toBytes(me.getKey().toString()));
           }
-          toFlush.add(e.getKey());
         }
       }
     }
-    return toFlush == null ? null : toFlush.toArray(new byte[0][]);
+    return toFlush;
   }
 }

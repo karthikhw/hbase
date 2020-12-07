@@ -24,13 +24,10 @@ import org.apache.hadoop.hbase.NamespaceDescriptor;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.master.MasterFileSystem;
 import org.apache.hadoop.hbase.master.TableNamespaceManager;
-import org.apache.yetus.audience.InterfaceAudience;
-
-import org.apache.hbase.thirdparty.com.google.common.annotations.VisibleForTesting;
-
 import org.apache.hadoop.hbase.procedure2.StateMachineProcedure;
 import org.apache.hadoop.hbase.rsgroup.RSGroupInfo;
-import org.apache.hadoop.hbase.util.FSUtils;
+import org.apache.hadoop.hbase.util.CommonFSUtils;
+import org.apache.yetus.audience.InterfaceAudience;
 
 /**
  * Base class for all the Namespace procedures that want to use a StateMachineProcedure. It provide
@@ -115,10 +112,10 @@ public abstract class AbstractStateMachineNamespaceProcedure<TState>
     createDirectory(env.getMasterServices().getMasterFileSystem(), nsDescriptor);
   }
 
-  @VisibleForTesting
   public static void createDirectory(MasterFileSystem mfs, NamespaceDescriptor nsDescriptor)
-      throws IOException {
-    mfs.getFileSystem().mkdirs(FSUtils.getNamespaceDir(mfs.getRootDir(), nsDescriptor.getName()));
+    throws IOException {
+    mfs.getFileSystem()
+      .mkdirs(CommonFSUtils.getNamespaceDir(mfs.getRootDir(), nsDescriptor.getName()));
   }
 
   protected void releaseSyncLatch() {

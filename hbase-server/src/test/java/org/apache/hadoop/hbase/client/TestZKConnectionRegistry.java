@@ -17,7 +17,6 @@
  */
 package org.apache.hadoop.hbase.client;
 
-import static org.apache.hadoop.hbase.HConstants.META_REPLICAS_NUM;
 import static org.hamcrest.CoreMatchers.instanceOf;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
@@ -25,6 +24,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.fail;
+
 import java.io.IOException;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.IntStream;
@@ -38,6 +38,7 @@ import org.apache.hadoop.hbase.RegionLocations;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.testclassification.ClientTests;
 import org.apache.hadoop.hbase.testclassification.MediumTests;
+import org.apache.hadoop.hbase.zookeeper.MiniZooKeeperCluster;
 import org.apache.hadoop.hbase.zookeeper.ReadOnlyZKClient;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -61,13 +62,9 @@ public class TestZKConnectionRegistry {
 
   @BeforeClass
   public static void setUp() throws Exception {
-    TEST_UTIL.getConfiguration().setInt(META_REPLICAS_NUM, 3);
     TEST_UTIL.startMiniCluster(3);
-    Configuration conf = new Configuration(TEST_UTIL.getConfiguration());
-    // make sure that we do not depend on this config when getting locations for meta replicas, see
-    // HBASE-21658.
-    conf.setInt(META_REPLICAS_NUM, 1);
-    REGISTRY = new ZKConnectionRegistry(conf);
+    HBaseTestingUtility.setReplicas(TEST_UTIL.getAdmin(), TableName.META_TABLE_NAME, 3);
+    REGISTRY = new ZKConnectionRegistry(TEST_UTIL.getConfiguration());
   }
 
   @AfterClass
@@ -101,7 +98,7 @@ public class TestZKConnectionRegistry {
   public void testIndependentZKConnections() throws IOException {
     try (ReadOnlyZKClient zk1 = REGISTRY.getZKClient()) {
       Configuration otherConf = new Configuration(TEST_UTIL.getConfiguration());
-      otherConf.set(HConstants.ZOOKEEPER_QUORUM, "localhost");
+      otherConf.set(HConstants.ZOOKEEPER_QUORUM, MiniZooKeeperCluster.HOST);
       try (ZKConnectionRegistry otherRegistry = new ZKConnectionRegistry(otherConf)) {
         ReadOnlyZKClient zk2 = otherRegistry.getZKClient();
         assertNotSame("Using a different configuration / quorum should result in different " +

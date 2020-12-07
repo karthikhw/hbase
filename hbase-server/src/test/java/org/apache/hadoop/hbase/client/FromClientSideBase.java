@@ -21,6 +21,7 @@ import static org.apache.hadoop.hbase.HBaseTestingUtility.countRows;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Iterator;
@@ -53,6 +54,7 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import org.apache.hbase.thirdparty.com.google.common.base.Preconditions;
 
 /**
@@ -86,20 +88,20 @@ class FromClientSideBase {
    * to initialize from scratch. While this is a hack, it saves a ton of time for the full
    * test and de-flakes it.
    */
-  protected static boolean isSameParameterizedCluster(Class registryImpl, int numHedgedReqs) {
+  protected static boolean isSameParameterizedCluster(Class<?> registryImpl, int numHedgedReqs) {
     if (TEST_UTIL == null) {
       return false;
     }
     Configuration conf = TEST_UTIL.getConfiguration();
-    Class confClass = conf.getClass(
-        HConstants.CLIENT_CONNECTION_REGISTRY_IMPL_CONF_KEY, ZKConnectionRegistry.class);
-    int hedgedReqConfig = conf.getInt(HConstants.HBASE_RPCS_HEDGED_REQS_FANOUT_KEY,
-        HConstants.HBASE_RPCS_HEDGED_REQS_FANOUT_DEFAULT);
+    Class<?> confClass = conf.getClass(HConstants.CLIENT_CONNECTION_REGISTRY_IMPL_CONF_KEY,
+      ZKConnectionRegistry.class);
+    int hedgedReqConfig = conf.getInt(MasterRegistry.MASTER_REGISTRY_HEDGED_REQS_FANOUT_KEY,
+      MasterRegistry.MASTER_REGISTRY_HEDGED_REQS_FANOUT_DEFAULT);
     return confClass.getName().equals(registryImpl.getName()) && numHedgedReqs == hedgedReqConfig;
   }
 
-  protected static final void initialize(Class registryImpl, int numHedgedReqs, Class<?>... cps)
-      throws Exception {
+  protected static final void initialize(Class<?> registryImpl, int numHedgedReqs, Class<?>... cps)
+    throws Exception {
     // initialize() is called for every unit test, however we only want to reset the cluster state
     // at the end of every parameterized run.
     if (isSameParameterizedCluster(registryImpl, numHedgedReqs)) {
@@ -123,13 +125,8 @@ class FromClientSideBase {
     conf.setBoolean(TableDescriptorChecker.TABLE_SANITY_CHECKS, true); // enable for below tests
     conf.setClass(HConstants.CLIENT_CONNECTION_REGISTRY_IMPL_CONF_KEY, registryImpl,
         ConnectionRegistry.class);
-    if (numHedgedReqs == 1) {
-      conf.setBoolean(HConstants.MASTER_REGISTRY_ENABLE_HEDGED_READS_KEY, false);
-    } else {
-      Preconditions.checkArgument(numHedgedReqs > 1);
-      conf.setBoolean(HConstants.MASTER_REGISTRY_ENABLE_HEDGED_READS_KEY, true);
-    }
-    conf.setInt(HConstants.HBASE_RPCS_HEDGED_REQS_FANOUT_KEY, numHedgedReqs);
+    Preconditions.checkArgument(numHedgedReqs > 0);
+    conf.setInt(MasterRegistry.MASTER_REGISTRY_HEDGED_REQS_FANOUT_KEY, numHedgedReqs);
     StartMiniClusterOption.Builder builder = StartMiniClusterOption.builder();
     // Multiple masters needed only when hedged reads for master registry are enabled.
     builder.numMasters(numHedgedReqs > 1 ? 3 : 1).numRegionServers(SLAVES);
@@ -245,7 +242,7 @@ class FromClientSideBase {
     assertTrue(key != null && key.length > 0 &&
       Bytes.BYTES_COMPARATOR.compare(key, new byte [] {'a', 'a', 'a'}) >= 0);
     LOG.info("Key=" + Bytes.toString(key));
-    Scan s = startRow == null? new Scan(): new Scan(startRow);
+    Scan s = startRow == null? new Scan(): new Scan().withStartRow(startRow);
     Filter f = new RowFilter(op, new BinaryComparator(key));
     f = new WhileMatchFilter(f);
     s.setFilter(f);
@@ -584,9 +581,9 @@ class FromClientSideBase {
   protected void scanVersionRangeAndVerifyGreaterThan(Table ht, byte [] row,
     byte [] family, byte [] qualifier, long [] stamps, byte [][] values,
     int start, int end) throws IOException {
-    Scan scan = new Scan(row);
+    Scan scan = new Scan().withStartRow(row);
     scan.addColumn(family, qualifier);
-    scan.setMaxVersions(Integer.MAX_VALUE);
+    scan.readVersions(Integer.MAX_VALUE);
     scan.setTimeRange(stamps[start+1], Long.MAX_VALUE);
     Result result = getSingleScanResult(ht, scan);
     assertNResult(result, row, family, qualifier, stamps, values, start+1, end);
@@ -594,9 +591,9 @@ class FromClientSideBase {
 
   protected void scanVersionRangeAndVerify(Table ht, byte [] row, byte [] family,
     byte [] qualifier, long [] stamps, byte [][] values, int start, int end) throws IOException {
-    Scan scan = new Scan(row);
+    Scan scan = new Scan().withStartRow(row);
     scan.addColumn(family, qualifier);
-    scan.setMaxVersions(Integer.MAX_VALUE);
+    scan.readVersions(Integer.MAX_VALUE);
     scan.setTimeRange(stamps[start], stamps[end]+1);
     Result result = getSingleScanResult(ht, scan);
     assertNResult(result, row, family, qualifier, stamps, values, start, end);
@@ -604,9 +601,9 @@ class FromClientSideBase {
 
   protected void scanAllVersionsAndVerify(Table ht, byte [] row, byte [] family,
     byte [] qualifier, long [] stamps, byte [][] values, int start, int end) throws IOException {
-    Scan scan = new Scan(row);
+    Scan scan = new Scan().withStartRow(row);
     scan.addColumn(family, qualifier);
-    scan.setMaxVersions(Integer.MAX_VALUE);
+    scan.readVersions(Integer.MAX_VALUE);
     Result result = getSingleScanResult(ht, scan);
     assertNResult(result, row, family, qualifier, stamps, values, start, end);
   }
@@ -633,20 +630,20 @@ class FromClientSideBase {
 
   protected void scanVersionAndVerify(Table ht, byte [] row, byte [] family,
     byte [] qualifier, long stamp, byte [] value) throws Exception {
-    Scan scan = new Scan(row);
+    Scan scan = new Scan().withStartRow(row);
     scan.addColumn(family, qualifier);
     scan.setTimestamp(stamp);
-    scan.setMaxVersions(Integer.MAX_VALUE);
+    scan.readVersions(Integer.MAX_VALUE);
     Result result = getSingleScanResult(ht, scan);
     assertSingleResult(result, row, family, qualifier, stamp, value);
   }
 
   protected void scanVersionAndVerifyMissing(Table ht, byte [] row,
     byte [] family, byte [] qualifier, long stamp) throws Exception {
-    Scan scan = new Scan(row);
+    Scan scan = new Scan().withStartRow(row);
     scan.addColumn(family, qualifier);
     scan.setTimestamp(stamp);
-    scan.setMaxVersions(Integer.MAX_VALUE);
+    scan.readVersions(Integer.MAX_VALUE);
     Result result = getSingleScanResult(ht, scan);
     assertNullResult(result);
   }
@@ -908,7 +905,7 @@ class FromClientSideBase {
 
     // Scan around inserted columns
 
-    scan = new Scan(ROWS[1]);
+    scan = new Scan().withStartRow(ROWS[1]);
     result = getSingleScanResult(ht, scan);
     assertNullResult(result);
 
@@ -986,17 +983,17 @@ class FromClientSideBase {
     assertSingleResult(result, ROWS[ROWIDX], FAMILIES[FAMILYIDX],
       QUALIFIERS[QUALIFIERIDX], VALUES[VALUEIDX]);
 
-    scan = new Scan(ROWS[ROWIDX]);
+    scan = new Scan().withStartRow(ROWS[ROWIDX]);
     result = getSingleScanResult(ht, scan);
     assertSingleResult(result, ROWS[ROWIDX], FAMILIES[FAMILYIDX],
       QUALIFIERS[QUALIFIERIDX], VALUES[VALUEIDX]);
 
-    scan = new Scan(ROWS[ROWIDX], ROWS[ROWIDX+1]);
+    scan = new Scan().withStartRow(ROWS[ROWIDX]).withStopRow(ROWS[ROWIDX+1], true);
     result = getSingleScanResult(ht, scan);
     assertSingleResult(result, ROWS[ROWIDX], FAMILIES[FAMILYIDX],
       QUALIFIERS[QUALIFIERIDX], VALUES[VALUEIDX]);
 
-    scan = new Scan(HConstants.EMPTY_START_ROW, ROWS[ROWIDX+1]);
+    scan = new Scan().withStartRow(HConstants.EMPTY_START_ROW).withStopRow(ROWS[ROWIDX+1], true);
     result = getSingleScanResult(ht, scan);
     assertSingleResult(result, ROWS[ROWIDX], FAMILIES[FAMILYIDX],
       QUALIFIERS[QUALIFIERIDX], VALUES[VALUEIDX]);
@@ -1063,15 +1060,15 @@ class FromClientSideBase {
 
   protected void scanVerifySingleEmpty(Table ht, byte [][] ROWS, int ROWIDX, byte [][] FAMILIES,
     int FAMILYIDX, byte [][] QUALIFIERS, int QUALIFIERIDX) throws Exception {
-    Scan scan = new Scan(ROWS[ROWIDX+1]);
+    Scan scan = new Scan().withStartRow(ROWS[ROWIDX+1]);
     Result result = getSingleScanResult(ht, scan);
     assertNullResult(result);
 
-    scan = new Scan(ROWS[ROWIDX+1],ROWS[ROWIDX+2]);
+    scan = new Scan().withStartRow(ROWS[ROWIDX+1]).withStopRow(ROWS[ROWIDX+2], true);
     result = getSingleScanResult(ht, scan);
     assertNullResult(result);
 
-    scan = new Scan(HConstants.EMPTY_START_ROW, ROWS[ROWIDX]);
+    scan = new Scan().withStartRow(HConstants.EMPTY_START_ROW).withStopRow(ROWS[ROWIDX]);
     result = getSingleScanResult(ht, scan);
     assertNullResult(result);
 

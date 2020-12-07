@@ -27,8 +27,6 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.apache.yetus.audience.InterfaceStability;
 
-import org.apache.hbase.thirdparty.com.google.common.annotations.VisibleForTesting;
-
 /**
  * <p>
  * This class is for maintaining the various regionserver statistics
@@ -95,12 +93,10 @@ public class MetricsRegionServer {
     return null;
   }
 
-  @VisibleForTesting
   public MetricsRegionServerSource getMetricsSource() {
     return serverSource;
   }
 
-  @VisibleForTesting
   public MetricsUserAggregate getMetricsUserAggregate() {
     return userAggregate;
   }
@@ -145,12 +141,25 @@ public class MetricsRegionServer {
     serverSource.updateDeleteBatch(t);
   }
 
-  public void updateCheckAndDelete(long t) {
+  public void updateCheckAndDelete(TableName tn, long t) {
+    if (tableMetrics != null && tn != null) {
+      tableMetrics.updateCheckAndDelete(tn, t);
+    }
     serverSource.updateCheckAndDelete(t);
   }
 
-  public void updateCheckAndPut(long t) {
+  public void updateCheckAndPut(TableName tn, long t) {
+    if (tableMetrics != null && tn != null) {
+      tableMetrics.updateCheckAndPut(tn, t);
+    }
     serverSource.updateCheckAndPut(t);
+  }
+
+  public void updateCheckAndMutate(TableName tn, long t) {
+    if (tableMetrics != null && tn != null) {
+      tableMetrics.updateCheckAndMutate(tn, t);
+    }
+    serverSource.updateCheckAndMutate(t);
   }
 
   public void updateGet(TableName tn, long t) {
@@ -224,7 +233,7 @@ public class MetricsRegionServer {
     serverSource.updateFlushOutputSize(fileSize);
 
     if (table != null) {
-      metricsTable.updateFlushTime(table, memstoreSize);
+      metricsTable.updateFlushTime(table, t);
       metricsTable.updateFlushMemstoreSize(table, memstoreSize);
       metricsTable.updateFlushOutputSize(table, fileSize);
     }

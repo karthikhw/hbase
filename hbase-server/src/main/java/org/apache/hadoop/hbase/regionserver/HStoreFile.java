@@ -47,8 +47,8 @@ import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.hbase.thirdparty.com.google.common.annotations.VisibleForTesting;
 import org.apache.hbase.thirdparty.com.google.common.base.Preconditions;
+
 import org.apache.hadoop.hbase.shaded.protobuf.ProtobufUtil;
 
 /**
@@ -297,8 +297,7 @@ public class HStoreFile implements StoreFile {
   }
 
   /**
-   * Only used by the Striped Compaction Policy
-   * @param key
+   * @param key to look up
    * @return value associated with the metadata key
    */
   public byte[] getMetadataValue(byte[] key) {
@@ -320,7 +319,6 @@ public class HStoreFile implements StoreFile {
     return compactedAway;
   }
 
-  @VisibleForTesting
   public int getRefCount() {
     return fileInfo.refCount.get();
   }
@@ -436,7 +434,7 @@ public class HStoreFile implements StoreFile {
     if (cfBloomType != BloomType.NONE) {
       initialReader.loadBloomfilter(BlockType.GENERAL_BLOOM_META);
       if (hfileBloomType != cfBloomType) {
-        LOG.info("HFile Bloom filter type for "
+        LOG.debug("HFile Bloom filter type for "
             + initialReader.getHFileReader().getName() + ": " + hfileBloomType
             + ", but " + cfBloomType + " specified in column family "
             + "configuration");

@@ -22,6 +22,7 @@ import static org.apache.hadoop.hbase.favored.FavoredNodeAssignmentHelper.FAVORE
 import static org.apache.hadoop.hbase.favored.FavoredNodesPlan.Position.PRIMARY;
 import static org.apache.hadoop.hbase.favored.FavoredNodesPlan.Position.SECONDARY;
 import static org.apache.hadoop.hbase.favored.FavoredNodesPlan.Position.TERTIARY;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -42,7 +43,7 @@ import org.apache.hadoop.net.NetUtils;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.apache.hbase.thirdparty.com.google.common.annotations.VisibleForTesting;
+
 import org.apache.hbase.thirdparty.com.google.common.collect.Lists;
 import org.apache.hbase.thirdparty.com.google.common.collect.Maps;
 import org.apache.hbase.thirdparty.com.google.common.collect.Sets;
@@ -95,7 +96,6 @@ public class FavoredNodesManager {
     datanodeDataTransferPort= getDataNodePort();
   }
 
-  @VisibleForTesting
   public int getDataNodePort() {
     HdfsConfiguration.init();
 
@@ -209,7 +209,7 @@ public class FavoredNodesManager {
     primaryRSToRegionMap.put(serverToUse, regionList);
 
     serverToUse = ServerName
-        .valueOf(servers.get(SECONDARY.ordinal()).getHostAndPort(), NON_STARTCODE);
+        .valueOf(servers.get(SECONDARY.ordinal()).getAddress(), NON_STARTCODE);
     regionList = secondaryRSToRegionMap.get(serverToUse);
     if (regionList == null) {
       regionList = new ArrayList<>();
@@ -217,7 +217,7 @@ public class FavoredNodesManager {
     regionList.add(hri);
     secondaryRSToRegionMap.put(serverToUse, regionList);
 
-    serverToUse = ServerName.valueOf(servers.get(TERTIARY.ordinal()).getHostAndPort(),
+    serverToUse = ServerName.valueOf(servers.get(TERTIARY.ordinal()).getAddress(),
       NON_STARTCODE);
     regionList = teritiaryRSToRegionMap.get(serverToUse);
     if (regionList == null) {
@@ -238,7 +238,7 @@ public class FavoredNodesManager {
   public synchronized Map<ServerName, List<Integer>> getReplicaLoad(List<ServerName> servers) {
     Map<ServerName, List<Integer>> result = Maps.newHashMap();
     for (ServerName sn : servers) {
-      ServerName serverWithNoStartCode = ServerName.valueOf(sn.getHostAndPort(), NON_STARTCODE);
+      ServerName serverWithNoStartCode = ServerName.valueOf(sn.getAddress(), NON_STARTCODE);
       List<Integer> countList = Lists.newArrayList();
       if (primaryRSToRegionMap.containsKey(serverWithNoStartCode)) {
         countList.add(primaryRSToRegionMap.get(serverWithNoStartCode).size());
@@ -282,11 +282,10 @@ public class FavoredNodesManager {
     }
   }
 
-  @VisibleForTesting
   public synchronized Set<RegionInfo> getRegionsOfFavoredNode(ServerName serverName) {
     Set<RegionInfo> regionInfos = Sets.newHashSet();
 
-    ServerName serverToUse = ServerName.valueOf(serverName.getHostAndPort(), NON_STARTCODE);
+    ServerName serverToUse = ServerName.valueOf(serverName.getAddress(), NON_STARTCODE);
     if (primaryRSToRegionMap.containsKey(serverToUse)) {
       regionInfos.addAll(primaryRSToRegionMap.get(serverToUse));
     }

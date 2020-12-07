@@ -19,6 +19,7 @@ package org.apache.hadoop.hbase.client;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -30,6 +31,7 @@ import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionLocation;
 import org.apache.hadoop.hbase.MultithreadedTestUtil;
 import org.apache.hadoop.hbase.ServerName;
+import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.master.HMaster;
 import org.apache.hadoop.hbase.master.MetaRegionLocationCache;
 import org.apache.hadoop.hbase.master.RegionState;
@@ -57,8 +59,8 @@ public class TestMetaRegionLocationCache {
 
   @BeforeClass
   public static void setUp() throws Exception {
-    TEST_UTIL.getConfiguration().setInt(HConstants.META_REPLICAS_NUM, 3);
     TEST_UTIL.startMiniCluster(3);
+    HBaseTestingUtility.setReplicas(TEST_UTIL.getAdmin(), TableName.META_TABLE_NAME, 3);
     REGISTRY = ConnectionRegistryFactory.getRegistry(TEST_UTIL.getConfiguration());
     RegionReplicaTestHelper.waitUntilAllMetaReplicasAreReady(TEST_UTIL, REGISTRY);
     TEST_UTIL.getAdmin().balancerSwitch(false, true);
@@ -96,6 +98,15 @@ public class TestMetaRegionLocationCache {
     assertFalse(metaHRLs.isEmpty());
     ZKWatcher zk = master.getZooKeeper();
     List<String> metaZnodes = zk.getMetaReplicaNodes();
+    // Wait till all replicas available.
+    retries = 0;
+    while (master.getMetaRegionLocationCache().getMetaRegionLocations().get().size() !=
+        metaZnodes.size()) {
+      Thread.sleep(1000);
+      if (++retries == 10) {
+        break;
+      }
+    }
     assertEquals(metaZnodes.size(), metaHRLs.size());
     List<HRegionLocation> actualHRLs = getCurrentMetaLocations(zk);
     Collections.sort(metaHRLs);
@@ -109,6 +120,7 @@ public class TestMetaRegionLocationCache {
 
   @Test public void testStandByMetaLocations() throws Exception {
     HMaster standBy = TEST_UTIL.getMiniHBaseCluster().startMaster().getMaster();
+    standBy.isInitialized();
     verifyCachedMetaLocations(standBy);
   }
 

@@ -32,13 +32,13 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Stoppable;
 import org.apache.hadoop.hbase.conf.ConfigurationObserver;
 import org.apache.hadoop.hbase.io.HFileLink;
+import org.apache.hadoop.hbase.master.region.MasterRegionFactory;
 import org.apache.hadoop.hbase.regionserver.StoreFileInfo;
 import org.apache.hadoop.hbase.util.StealJobQueue;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.hbase.thirdparty.com.google.common.annotations.VisibleForTesting;
 /**
  * This Chore, every time it runs, will clear the HFiles in the hfile archive
  * folder that are deletable for each HFile cleaner in the chain.
@@ -81,12 +81,10 @@ public class HFileCleaner extends CleanerChore<BaseHFileCleanerDelegate>
 
   public static final String HFILE_DELETE_THREAD_TIMEOUT_MSEC =
       "hbase.regionserver.hfilecleaner.thread.timeout.msec";
-  @VisibleForTesting
   static final long DEFAULT_HFILE_DELETE_THREAD_TIMEOUT_MSEC = 60 * 1000L;
 
   public static final String HFILE_DELETE_THREAD_CHECK_INTERVAL_MSEC =
       "hbase.regionserver.hfilecleaner.thread.check.interval.msec";
-  @VisibleForTesting
   static final long DEFAULT_HFILE_DELETE_THREAD_CHECK_INTERVAL_MSEC = 1000L;
 
   private static final Logger LOG = LoggerFactory.getLogger(HFileCleaner.class);
@@ -101,7 +99,7 @@ public class HFileCleaner extends CleanerChore<BaseHFileCleanerDelegate>
   private long cleanerThreadTimeoutMsec;
   private long cleanerThreadCheckIntervalMsec;
   private List<Thread> threads = new ArrayList<Thread>();
-  private boolean running;
+  private volatile boolean running;
 
   private AtomicLong deletedLargeFiles = new AtomicLong();
   private AtomicLong deletedSmallFiles = new AtomicLong();
@@ -158,10 +156,9 @@ public class HFileCleaner extends CleanerChore<BaseHFileCleanerDelegate>
 
   @Override
   protected boolean validate(Path file) {
-    if (HFileLink.isBackReferencesDir(file) || HFileLink.isBackReferencesDir(file.getParent())) {
-      return true;
-    }
-    return StoreFileInfo.validateStoreFileName(file.getName());
+    return HFileLink.isBackReferencesDir(file) || HFileLink.isBackReferencesDir(file.getParent()) ||
+      StoreFileInfo.validateStoreFileName(file.getName()) ||
+      file.getName().endsWith(MasterRegionFactory.ARCHIVED_HFILE_SUFFIX);
   }
 
   /**
@@ -383,42 +380,34 @@ public class HFileCleaner extends CleanerChore<BaseHFileCleanerDelegate>
     }
   }
 
-  @VisibleForTesting
   public List<Thread> getCleanerThreads() {
     return threads;
   }
 
-  @VisibleForTesting
   public long getNumOfDeletedLargeFiles() {
     return deletedLargeFiles.get();
   }
 
-  @VisibleForTesting
   public long getNumOfDeletedSmallFiles() {
     return deletedSmallFiles.get();
   }
 
-  @VisibleForTesting
   public long getLargeQueueInitSize() {
     return largeQueueInitSize;
   }
 
-  @VisibleForTesting
   public long getSmallQueueInitSize() {
     return smallQueueInitSize;
   }
 
-  @VisibleForTesting
   public long getThrottlePoint() {
     return throttlePoint;
   }
 
-  @VisibleForTesting
   long getCleanerThreadTimeoutMsec() {
     return cleanerThreadTimeoutMsec;
   }
 
-  @VisibleForTesting
   long getCleanerThreadCheckIntervalMsec() {
     return cleanerThreadCheckIntervalMsec;
   }

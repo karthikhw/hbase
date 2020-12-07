@@ -20,7 +20,7 @@ package org.apache.hadoop.hbase.security.access;
 import static org.apache.hadoop.hbase.AuthUtil.toGroupEntry;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
-import com.google.protobuf.BlockingRpcChannel;
+
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -38,11 +38,11 @@ import org.apache.hadoop.hbase.client.ConnectionFactory;
 import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.Table;
+import org.apache.hadoop.hbase.client.TableDescriptor;
 import org.apache.hadoop.hbase.client.TableDescriptorBuilder;
 import org.apache.hadoop.hbase.coprocessor.MasterCoprocessorEnvironment;
 import org.apache.hadoop.hbase.coprocessor.ObserverContextImpl;
 import org.apache.hadoop.hbase.ipc.NettyRpcClientConfigHelper;
-import org.apache.hadoop.hbase.protobuf.generated.AccessControlProtos.AccessControlService;
 import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.security.access.Permission.Action;
 import org.apache.hadoop.hbase.testclassification.MediumTests;
@@ -56,7 +56,11 @@ import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import org.apache.hbase.thirdparty.com.google.common.collect.ListMultimap;
+import org.apache.hbase.thirdparty.com.google.protobuf.BlockingRpcChannel;
+
+import org.apache.hadoop.hbase.shaded.protobuf.generated.AccessControlProtos.AccessControlService;
 
 @Category({SecurityTests.class, MediumTests.class})
 public class TestNamespaceCommands extends SecureTestUtil {
@@ -517,20 +521,20 @@ public class TestNamespaceCommands extends SecureTestUtil {
     AccessTestAction createTable = new AccessTestAction() {
       @Override
       public Object run() throws Exception {
-        TableDescriptorBuilder.ModifyableTableDescriptor tableDescriptor =
-          new TableDescriptorBuilder.ModifyableTableDescriptor(TableName.valueOf(TEST_TABLE));
-        tableDescriptor.setColumnFamily(
-          new ColumnFamilyDescriptorBuilder.ModifyableColumnFamilyDescriptor(TEST_FAMILY));
+        TableDescriptor tableDescriptor =
+          TableDescriptorBuilder.newBuilder(TableName.valueOf(TEST_TABLE))
+            .setColumnFamily(ColumnFamilyDescriptorBuilder.of(TEST_FAMILY)).build();
         ACCESS_CONTROLLER.preCreateTable(ObserverContextImpl.createAndPrepare(CP_ENV),
           tableDescriptor, null);
         return null;
       }
     };
 
-    //createTable            : superuser | global(C) | NS(C)
-    verifyAllowed(createTable, SUPERUSER, USER_GLOBAL_CREATE, USER_NS_CREATE, USER_GROUP_CREATE);
-    verifyDenied(createTable, USER_GLOBAL_ADMIN, USER_GLOBAL_WRITE, USER_GLOBAL_READ,
-      USER_GLOBAL_EXEC, USER_NS_ADMIN, USER_NS_WRITE, USER_NS_READ, USER_NS_EXEC,
-      USER_TABLE_CREATE, USER_TABLE_WRITE, USER_GROUP_READ, USER_GROUP_WRITE, USER_GROUP_ADMIN);
+    //createTable            : superuser | global(AC) | NS(AC)
+    verifyAllowed(createTable, SUPERUSER, USER_GLOBAL_CREATE, USER_NS_CREATE, USER_GROUP_CREATE,
+      USER_GLOBAL_ADMIN, USER_NS_ADMIN, USER_GROUP_ADMIN);
+    verifyDenied(createTable, USER_GLOBAL_WRITE, USER_GLOBAL_READ, USER_GLOBAL_EXEC,
+      USER_NS_WRITE, USER_NS_READ, USER_NS_EXEC, USER_TABLE_CREATE, USER_TABLE_WRITE,
+      USER_GROUP_READ, USER_GROUP_WRITE);
   }
 }

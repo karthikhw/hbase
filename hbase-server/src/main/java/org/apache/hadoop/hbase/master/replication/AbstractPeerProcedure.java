@@ -21,7 +21,6 @@ import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.util.HashMap;
 import java.util.Map;
-import org.apache.hadoop.hbase.MetaTableAccessor;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.TableNotFoundException;
 import org.apache.hadoop.hbase.client.Connection;
@@ -30,6 +29,7 @@ import org.apache.hadoop.hbase.master.TableStateManager;
 import org.apache.hadoop.hbase.master.procedure.MasterProcedureEnv;
 import org.apache.hadoop.hbase.master.procedure.PeerProcedureInterface;
 import org.apache.hadoop.hbase.master.procedure.ProcedurePrepareLatch;
+import org.apache.hadoop.hbase.replication.ReplicationBarrierFamilyFormat;
 import org.apache.hadoop.hbase.replication.ReplicationException;
 import org.apache.hadoop.hbase.replication.ReplicationPeerConfig;
 import org.apache.hadoop.hbase.replication.ReplicationQueueStorage;
@@ -37,8 +37,6 @@ import org.apache.hadoop.hbase.util.Pair;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import org.apache.hbase.thirdparty.com.google.common.annotations.VisibleForTesting;
 
 /**
  * The base class for all replication peer related procedure.
@@ -93,7 +91,6 @@ public abstract class AbstractPeerProcedure<TState> extends AbstractPeerNoLockPr
   }
 
   // will be override in test to simulate error
-  @VisibleForTesting
   protected void enablePeer(MasterProcedureEnv env) throws ReplicationException {
     env.getReplicationPeerManager().enablePeer(peerId);
   }
@@ -160,7 +157,7 @@ public abstract class AbstractPeerProcedure<TState> extends AbstractPeerNoLockPr
       LOG.debug("Skip settting last pushed sequence id for {}", tableName);
       return;
     }
-    for (Pair<String, Long> name2Barrier : MetaTableAccessor
+    for (Pair<String, Long> name2Barrier : ReplicationBarrierFamilyFormat
       .getTableEncodedRegionNameAndLastBarrier(conn, tableName)) {
       LOG.trace("Update last pushed sequence id for {}, {}", tableName, name2Barrier);
       addToMap(lastSeqIds, name2Barrier.getFirst(), name2Barrier.getSecond().longValue() - 1,

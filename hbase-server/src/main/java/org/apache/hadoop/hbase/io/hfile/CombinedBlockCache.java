@@ -25,9 +25,6 @@ import org.apache.hadoop.hbase.io.HeapSize;
 import org.apache.hadoop.hbase.io.hfile.BlockType.BlockCategory;
 import org.apache.hadoop.hbase.io.hfile.bucket.BucketCache;
 
-import org.apache.hbase.thirdparty.com.google.common.annotations.VisibleForTesting;
-
-
 /**
  * CombinedBlockCache is an abstraction layer that combines
  * {@link FirstLevelBlockCache} and {@link BucketCache}. The smaller lruCache is used
@@ -61,7 +58,7 @@ public class CombinedBlockCache implements ResizableBlockCache, HeapSize {
 
   @Override
   public void cacheBlock(BlockCacheKey cacheKey, Cacheable buf, boolean inMemory) {
-    boolean metaBlock = buf.getBlockType().getCategory() != BlockCategory.DATA;
+    boolean metaBlock = isMetaBlock(buf.getBlockType());
     if (metaBlock) {
       l1Cache.cacheBlock(cacheKey, buf, inMemory);
     } else {
@@ -74,6 +71,10 @@ public class CombinedBlockCache implements ResizableBlockCache, HeapSize {
     cacheBlock(cacheKey, buf, false);
   }
 
+  private boolean isMetaBlock(BlockType blockType) {
+    return blockType.getCategory() != BlockCategory.DATA;
+  }
+
   @Override
   public Cacheable getBlock(BlockCacheKey cacheKey, boolean caching,
       boolean repeat, boolean updateCacheMetrics) {
@@ -84,6 +85,20 @@ public class CombinedBlockCache implements ResizableBlockCache, HeapSize {
     return l1Cache.containsBlock(cacheKey)?
         l1Cache.getBlock(cacheKey, caching, repeat, updateCacheMetrics):
         l2Cache.getBlock(cacheKey, caching, repeat, updateCacheMetrics);
+  }
+
+  @Override
+  public Cacheable getBlock(BlockCacheKey cacheKey, boolean caching, boolean repeat,
+      boolean updateCacheMetrics, BlockType blockType) {
+    if (blockType == null) {
+      return getBlock(cacheKey, caching, repeat, updateCacheMetrics);
+    }
+    boolean metaBlock = isMetaBlock(blockType);
+    if (metaBlock) {
+      return l1Cache.getBlock(cacheKey, caching, repeat, updateCacheMetrics);
+    } else {
+      return l2Cache.getBlock(cacheKey, caching, repeat, updateCacheMetrics);
+    }
   }
 
   @Override
@@ -379,7 +394,6 @@ public class CombinedBlockCache implements ResizableBlockCache, HeapSize {
     this.l1Cache.setMaxSize(size);
   }
 
-  @VisibleForTesting
   public int getRpcRefCount(BlockCacheKey cacheKey) {
     return (this.l2Cache instanceof BucketCache)
         ? ((BucketCache) this.l2Cache).getRpcRefCount(cacheKey)

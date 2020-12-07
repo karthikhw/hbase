@@ -27,7 +27,6 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
-
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
@@ -35,12 +34,12 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Stoppable;
 import org.apache.hadoop.hbase.conf.ConfigurationObserver;
 import org.apache.hadoop.hbase.master.procedure.MasterProcedureUtil;
+import org.apache.hadoop.hbase.master.region.MasterRegionFactory;
 import org.apache.hadoop.hbase.wal.AbstractFSWALProvider;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.hbase.thirdparty.com.google.common.annotations.VisibleForTesting;
 import org.apache.hbase.thirdparty.com.google.common.base.Preconditions;
 
 /**
@@ -58,7 +57,6 @@ public class LogCleaner extends CleanerChore<BaseLogCleanerDelegate>
 
   public static final String OLD_WALS_CLEANER_THREAD_TIMEOUT_MSEC =
       "hbase.oldwals.cleaner.thread.timeout.msec";
-  @VisibleForTesting
   static final long DEFAULT_OLD_WALS_CLEANER_THREAD_TIMEOUT_MSEC = 60 * 1000L;
 
   private final LinkedBlockingQueue<CleanerContext> pendingDelete;
@@ -86,8 +84,9 @@ public class LogCleaner extends CleanerChore<BaseLogCleanerDelegate>
 
   @Override
   protected boolean validate(Path file) {
-    return AbstractFSWALProvider.validateWALFilename(file.getName())
-        || MasterProcedureUtil.validateProcedureWALFilename(file.getName());
+    return AbstractFSWALProvider.validateWALFilename(file.getName()) ||
+      MasterProcedureUtil.validateProcedureWALFilename(file.getName()) ||
+      file.getName().endsWith(MasterRegionFactory.ARCHIVED_WAL_SUFFIX);
   }
 
   @Override
@@ -136,12 +135,10 @@ public class LogCleaner extends CleanerChore<BaseLogCleanerDelegate>
     interruptOldWALsCleaner();
   }
 
-  @VisibleForTesting
   int getSizeOfCleaners() {
     return oldWALsCleaner.size();
   }
 
-  @VisibleForTesting
   long getCleanerThreadTimeoutMsec() {
     return cleanerThreadTimeoutMsec;
   }

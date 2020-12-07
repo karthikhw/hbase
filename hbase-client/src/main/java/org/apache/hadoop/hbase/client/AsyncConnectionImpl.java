@@ -28,6 +28,8 @@ import static org.apache.hadoop.hbase.client.NonceGenerator.CLIENT_NONCES_ENABLE
 import static org.apache.hadoop.hbase.util.FutureUtils.addListener;
 
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -54,11 +56,11 @@ import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.util.ConcurrentMapUtils;
 import org.apache.hadoop.hbase.util.Threads;
 import org.apache.hadoop.security.UserGroupInformation;
+import org.apache.hbase.thirdparty.com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.hbase.thirdparty.com.google.common.annotations.VisibleForTesting;
 import org.apache.hbase.thirdparty.io.netty.util.HashedWheelTimer;
 
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.AdminService;
@@ -74,11 +76,10 @@ class AsyncConnectionImpl implements AsyncConnection {
 
   private static final Logger LOG = LoggerFactory.getLogger(AsyncConnectionImpl.class);
 
-  @VisibleForTesting
   static final HashedWheelTimer RETRY_TIMER = new HashedWheelTimer(
-    Threads.newDaemonThreadFactory("Async-Client-Retry-Timer"), 10, TimeUnit.MILLISECONDS);
-
-  private static final String RESOLVE_HOSTNAME_ON_FAIL_KEY = "hbase.resolve.hostnames.on.failure";
+    new ThreadFactoryBuilder().setNameFormat("Async-Client-Retry-Timer-pool-%d").setDaemon(true)
+      .setUncaughtExceptionHandler(Threads.LOGGING_EXCEPTION_HANDLER).build(),
+    10, TimeUnit.MILLISECONDS);
 
   private final Configuration conf;
 
@@ -93,8 +94,6 @@ class AsyncConnectionImpl implements AsyncConnection {
   protected final RpcClient rpcClient;
 
   final RpcControllerFactory rpcControllerFactory;
-
-  private final boolean hostnameCanChange;
 
   private final AsyncRegionLocator locator;
 
@@ -113,7 +112,7 @@ class AsyncConnectionImpl implements AsyncConnection {
   private final Optional<ServerStatisticTracker> stats;
   private final ClientBackoffPolicy backoffPolicy;
 
-  private ChoreService authService;
+  private ChoreService choreService;
 
   private final AtomicBoolean closed = new AtomicBoolean(false);
 
@@ -127,6 +126,7 @@ class AsyncConnectionImpl implements AsyncConnection {
       SocketAddress localAddress, User user) {
     this.conf = conf;
     this.user = user;
+
     if (user.isLoginFromKeytab()) {
       spawnRenewalChore(user.getUGI());
     }
@@ -140,7 +140,6 @@ class AsyncConnectionImpl implements AsyncConnection {
     this.rpcClient = RpcClientFactory.createClient(
         conf, clusterId, localAddress, metrics.orElse(null));
     this.rpcControllerFactory = RpcControllerFactory.instantiate(conf);
-    this.hostnameCanChange = conf.getBoolean(RESOLVE_HOSTNAME_ON_FAIL_KEY, true);
     this.rpcTimeout =
       (int) Math.min(Integer.MAX_VALUE, TimeUnit.NANOSECONDS.toMillis(connConf.getRpcTimeoutNs()));
     this.locator = new AsyncRegionLocator(this, RETRY_TIMER);
@@ -179,8 +178,19 @@ class AsyncConnectionImpl implements AsyncConnection {
   }
 
   private void spawnRenewalChore(final UserGroupInformation user) {
-    authService = new ChoreService("Relogin service");
-    authService.scheduleChore(AuthUtil.getAuthRenewalChore(user));
+    ChoreService service = getChoreService();
+    service.scheduleChore(AuthUtil.getAuthRenewalChore(user));
+  }
+
+  /**
+   * If choreService has not been created yet, create the ChoreService.
+   * @return ChoreService
+   */
+  synchronized ChoreService getChoreService() {
+    if (choreService == null) {
+      choreService = new ChoreService("AsyncConn Chore Service");
+    }
+    return choreService;
   }
 
   @Override
@@ -198,17 +208,31 @@ class AsyncConnectionImpl implements AsyncConnection {
     if (!closed.compareAndSet(false, true)) {
       return;
     }
+    LOG.info("Connection has been closed by {}.", Thread.currentThread().getName());
+    if(LOG.isDebugEnabled()){
+      logCallStack(Thread.currentThread().getStackTrace());
+    }
     IOUtils.closeQuietly(clusterStatusListener);
     IOUtils.closeQuietly(rpcClient);
     IOUtils.closeQuietly(registry);
-    if (authService != null) {
-      authService.shutdown();
+    if (choreService != null) {
+      choreService.shutdown();
     }
     metrics.ifPresent(MetricsConnection::shutdown);
     ConnectionOverAsyncConnection c = this.conn;
     if (c != null) {
       c.closePool();
     }
+  }
+
+  private void logCallStack(StackTraceElement[] stackTraceElements) {
+    StringBuilder stackBuilder = new StringBuilder("Call stack:");
+    for (StackTraceElement element : stackTraceElements) {
+      stackBuilder.append("\n    at ");
+      stackBuilder.append(element);
+    }
+    stackBuilder.append("\n");
+    LOG.debug(stackBuilder.toString());
   }
 
   @Override
@@ -237,7 +261,7 @@ class AsyncConnectionImpl implements AsyncConnection {
 
   ClientService.Interface getRegionServerStub(ServerName serverName) throws IOException {
     return ConcurrentMapUtils.computeIfAbsentEx(rsStubs,
-      getStubKey(ClientService.Interface.class.getSimpleName(), serverName, hostnameCanChange),
+      getStubKey(ClientService.getDescriptor().getName(), serverName),
       () -> createRegionServerStub(serverName));
   }
 
@@ -251,7 +275,7 @@ class AsyncConnectionImpl implements AsyncConnection {
 
   AdminService.Interface getAdminStub(ServerName serverName) throws IOException {
     return ConcurrentMapUtils.computeIfAbsentEx(adminSubs,
-      getStubKey(AdminService.Interface.class.getSimpleName(), serverName, hostnameCanChange),
+      getStubKey(AdminService.getDescriptor().getName(), serverName),
       () -> createAdminServerStub(serverName));
   }
 

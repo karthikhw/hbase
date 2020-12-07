@@ -24,6 +24,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -37,9 +38,7 @@ import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.ClusterMetrics.Option;
 import org.apache.hadoop.hbase.HBaseClassTestRule;
-import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
-import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.MiniHBaseCluster;
 import org.apache.hadoop.hbase.TableName;
@@ -559,9 +558,9 @@ public class TestFromClientSide4 extends FromClientSideBase {
       assertNResult(result, ROW, FAMILY, QUALIFIER, new long[] { STAMPS[4], STAMPS[5] },
         new byte[][] { VALUES[4], VALUES[5] }, 0, 1);
 
-      Scan scan = new Scan(ROW);
+      Scan scan = new Scan().withStartRow(ROW);
       scan.addColumn(FAMILY, QUALIFIER);
-      scan.setMaxVersions(2);
+      scan.readVersions(2);
       result = getSingleScanResult(ht, scan);
       assertNResult(result, ROW, FAMILY, QUALIFIER, new long[] { STAMPS[4], STAMPS[5] },
         new byte[][] { VALUES[4], VALUES[5] }, 0, 1);
@@ -596,9 +595,9 @@ public class TestFromClientSide4 extends FromClientSideBase {
       assertNResult(result, ROW, FAMILY, QUALIFIER, new long[] { STAMPS[4], STAMPS[5] },
         new byte[][] { VALUES[4], VALUES[5] }, 0, 1);
 
-      scan = new Scan(ROW);
+      scan = new Scan().withStartRow(ROW);
       scan.addColumn(FAMILY, QUALIFIER);
-      scan.setMaxVersions(2);
+      scan.readVersions(2);
       result = getSingleScanResult(ht, scan);
       assertNResult(result, ROW, FAMILY, QUALIFIER, new long[] { STAMPS[4], STAMPS[5] },
         new byte[][] { VALUES[4], VALUES[5] }, 0, 1);
@@ -624,9 +623,9 @@ public class TestFromClientSide4 extends FromClientSideBase {
         new byte[][] { VALUES[2], VALUES[3], VALUES[14], VALUES[5], VALUES[6], VALUES[7],
           VALUES[8] }, 0, 6);
 
-      scan = new Scan(ROW);
+      scan = new Scan().withStartRow(ROW);
       scan.addColumn(FAMILY, QUALIFIER);
-      scan.setMaxVersions(7);
+      scan.readVersions(7);
       result = getSingleScanResult(ht, scan);
       assertNResult(result, ROW, FAMILY, QUALIFIER,
         new long[] { STAMPS[2], STAMPS[3], STAMPS[4], STAMPS[5], STAMPS[6], STAMPS[7], STAMPS[8] },
@@ -641,8 +640,8 @@ public class TestFromClientSide4 extends FromClientSideBase {
         new byte[][] { VALUES[2], VALUES[3], VALUES[14], VALUES[5], VALUES[6], VALUES[7],
           VALUES[8] }, 0, 6);
 
-      scan = new Scan(ROW);
-      scan.setMaxVersions(7);
+      scan = new Scan().withStartRow(ROW);
+      scan.readVersions(7);
       result = getSingleScanResult(ht, scan);
       assertNResult(result, ROW, FAMILY, QUALIFIER,
         new long[] { STAMPS[2], STAMPS[3], STAMPS[4], STAMPS[5], STAMPS[6], STAMPS[7], STAMPS[8] },
@@ -687,9 +686,9 @@ public class TestFromClientSide4 extends FromClientSideBase {
         new byte[][] { VALUES[3], VALUES[14], VALUES[5], VALUES[6], VALUES[7], VALUES[8], VALUES[9],
           VALUES[11], VALUES[13], VALUES[15] }, 0, 9);
 
-      scan = new Scan(ROW);
+      scan = new Scan().withStartRow(ROW);
       scan.addColumn(FAMILY, QUALIFIER);
-      scan.setMaxVersions(Integer.MAX_VALUE);
+      scan.readVersions(Integer.MAX_VALUE);
       result = getSingleScanResult(ht, scan);
       assertNResult(result, ROW, FAMILY, QUALIFIER,
         new long[] { STAMPS[3], STAMPS[4], STAMPS[5], STAMPS[6], STAMPS[7], STAMPS[8], STAMPS[9],
@@ -714,9 +713,9 @@ public class TestFromClientSide4 extends FromClientSideBase {
         new byte[][] { VALUES[1], VALUES[2], VALUES[3], VALUES[14], VALUES[5], VALUES[6], VALUES[8],
           VALUES[9], VALUES[13], VALUES[15] }, 0, 9);
 
-      scan = new Scan(ROW);
+      scan = new Scan().withStartRow(ROW);
       scan.addColumn(FAMILY, QUALIFIER);
-      scan.setMaxVersions(Integer.MAX_VALUE);
+      scan.readVersions(Integer.MAX_VALUE);
       result = getSingleScanResult(ht, scan);
       assertNResult(result, ROW, FAMILY, QUALIFIER,
         new long[] { STAMPS[1], STAMPS[2], STAMPS[3], STAMPS[4], STAMPS[5], STAMPS[6], STAMPS[8],
@@ -1309,29 +1308,31 @@ public class TestFromClientSide4 extends FromClientSideBase {
       // Test user metadata
       Admin admin = TEST_UTIL.getAdmin();
       // make a modifiable descriptor
-      HTableDescriptor desc = new HTableDescriptor(a.getDescriptor());
+      TableDescriptor desc = a.getDescriptor();
       // offline the table
       admin.disableTable(tableAname);
       // add a user attribute to HTD
-      desc.setValue(attrName, attrValue);
+      TableDescriptorBuilder builder =
+        TableDescriptorBuilder.newBuilder(desc).setValue(attrName, attrValue);
       // add a user attribute to HCD
-      for (HColumnDescriptor c : desc.getFamilies()) {
-        c.setValue(attrName, attrValue);
+      for (ColumnFamilyDescriptor c : desc.getColumnFamilies()) {
+        builder.modifyColumnFamily(
+          ColumnFamilyDescriptorBuilder.newBuilder(c).setValue(attrName, attrValue).build());
       }
       // update metadata for all regions of this table
-      admin.modifyTable(desc);
+      admin.modifyTable(builder.build());
       // enable the table
       admin.enableTable(tableAname);
 
       // Test that attribute changes were applied
-      desc = new HTableDescriptor(a.getDescriptor());
+      desc = a.getDescriptor();
       assertEquals("wrong table descriptor returned", desc.getTableName(), tableAname);
       // check HTD attribute
       value = desc.getValue(attrName);
       assertNotNull("missing HTD attribute value", value);
       assertFalse("HTD attribute value is incorrect", Bytes.compareTo(value, attrValue) != 0);
       // check HCD attribute
-      for (HColumnDescriptor c : desc.getFamilies()) {
+      for (ColumnFamilyDescriptor c : desc.getColumnFamilies()) {
         value = c.getValue(attrName);
         assertNotNull("missing HCD attribute value", value);
         assertFalse("HCD attribute value is incorrect", Bytes.compareTo(value, attrValue) != 0);

@@ -40,8 +40,6 @@ import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.hbase.thirdparty.com.google.common.annotations.VisibleForTesting;
-
 /**
  * An HBase Key/Value. This is the fundamental HBase Type.
  * <p>
@@ -104,7 +102,8 @@ public class KeyValue implements ExtendedCell, Cloneable {
   /**
    * A {@link KVComparator} for <code>hbase:meta</code> catalog table
    * {@link KeyValue}s.
-   * @deprecated Use {@link CellComparatorImpl#META_COMPARATOR} instead. Deprecated for hbase 2.0, remove for hbase 3.0.
+   * @deprecated Use {@link MetaCellComparator#META_COMPARATOR} instead.
+   *   Deprecated for hbase 2.0, remove for hbase 3.0.
    */
   @Deprecated
   public static final KVComparator META_COMPARATOR = new MetaComparator();
@@ -1231,7 +1230,6 @@ public class KeyValue implements ExtendedCell, Cloneable {
    * and that we need access to the backing array to do some test case related assertions.
    * @return The byte array backing this KeyValue.
    */
-  @VisibleForTesting
   public byte [] getBuffer() {
     return this.bytes;
   }
@@ -1606,7 +1604,8 @@ public class KeyValue implements ExtendedCell, Cloneable {
   /**
    * A {@link KVComparator} for <code>hbase:meta</code> catalog table
    * {@link KeyValue}s.
-   * @deprecated : {@link CellComparatorImpl#META_COMPARATOR} to be used. Deprecated for hbase 2.0, remove for hbase 3.0.
+   * @deprecated : {@link MetaCellComparator#META_COMPARATOR} to be used.
+   *   Deprecated for hbase 2.0, remove for hbase 3.0.
    */
   @Deprecated
   public static class MetaComparator extends KVComparator {
@@ -1616,7 +1615,8 @@ public class KeyValue implements ExtendedCell, Cloneable {
      */
     @Override
     public int compare(final Cell left, final Cell right) {
-      return PrivateCellUtil.compareKeyIgnoresMvcc(CellComparatorImpl.META_COMPARATOR, left, right);
+      return PrivateCellUtil.compareKeyIgnoresMvcc(MetaCellComparator.META_COMPARATOR, left,
+        right);
     }
 
     @Override
