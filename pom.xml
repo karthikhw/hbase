@@ -472,6 +472,12 @@
       <timezone>-8</timezone>
     </developer>
     <developer>
+      <id>niuyulin</id>
+      <name>Yulin Niu</name>
+      <email>niuyulin@apache.org</email>
+      <timezone>+8</timezone>
+    </developer>
+    <developer>
       <id>nkeywal</id>
       <name>Nicolas Liochon</name>
       <email>nkeywal@apache.org</email>
@@ -678,6 +684,12 @@
       <id>wangzheng</id>
       <name>Zheng (bsglz) Wang</name>
       <email>wangzheng@apache.org</email>
+      <timezone>+8</timezone>
+    </developer>
+    <developer>
+      <id>sunxin</id>
+      <name>Xin Sun</name>
+      <email>sunxin@apache.org</email>
       <timezone>+8</timezone>
     </developer>
   </developers>
@@ -1188,8 +1200,8 @@
               <rules>
                 <bannedDependencies>
                   <excludes>
-                    <exclude>>org.glassfish.jersey.containers:**</exclude>
-                    <exclude>>org.glassfish.jersey.core:**</exclude>
+                    <exclude>org.glassfish.jersey.containers:**</exclude>
+                    <exclude>org.glassfish.jersey.core:**</exclude>
                   </excludes>
                   <message>
                     Use shaded jersey instead
@@ -1599,7 +1611,7 @@
     <commons-codec.version>1.13</commons-codec.version>
     <commons-validator.version>1.6</commons-validator.version>
     <!-- pretty outdated -->
-    <commons-io.version>2.6</commons-io.version>
+    <commons-io.version>2.8.0</commons-io.version>
     <commons-lang3.version>3.9</commons-lang3.version>
     <commons-math.version>3.6.1</commons-math.version>
     <disruptor.version>3.4.2</disruptor.version>
@@ -2274,13 +2286,11 @@
         <groupId>org.hamcrest</groupId>
         <artifactId>hamcrest-core</artifactId>
         <version>${hamcrest.version}</version>
-        <scope>test</scope>
       </dependency>
       <dependency>
         <groupId>org.hamcrest</groupId>
         <artifactId>hamcrest-library</artifactId>
         <version>${hamcrest.version}</version>
-        <scope>test</scope>
       </dependency>
       <dependency>
         <groupId>org.mockito</groupId>
